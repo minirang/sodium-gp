@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "SODIUM GP - 3D 웹 레이싱 게임",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --minify --format=iife --outfile=dist/game.js",
+    "build": "esbuild src/main.js --bundle --minify --format=iife --loader:.glb=base64 --outfile=dist/game.js",
     "serve": "npx --yes serve ."
   },
   "keywords": [],
