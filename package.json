@@ -1,0 +1,17 @@
+{
+  "name": "sodium-gp",
+  "version": "1.0.0",
+  "description": "SODIUM GP - 3D 웹 레이싱 게임",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --minify --format=iife --outfile=dist/game.js",
+    "serve": "npx --yes serve ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "cannon-es": "^0.20.0",
+    "esbuild": "^0.28.2",
+    "three": "^0.160.0"
+  }
+}
