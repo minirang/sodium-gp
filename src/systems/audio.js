@@ -35,13 +35,13 @@ export class Sound {
 
         this.turbo = c.createOscillator(); this.tg = c.createGain(); this.tg.gain.value = 0; this.turbo.frequency.value = 3000;
         this.turbo.connect(this.tg); this.tg.connect(this.m); this.turbo.start();
-        this.prevThr = 0; this.volume(this.mv ?? 0.8, this.ev ?? 0.7);
+        this.prevThr = 0; this.fc = 0; this.timers = new Set(); this.volume(this.mv ?? 0.8, this.ev ?? 0.7);
     }
 
     volume(m, e) { this.mv = m; this.ev = e; if (this.c) this.m.gain.value = m; }
 
     drive(s) {
-        if (!this.c) return;
+        if (!this.c || (this.fc++ & 1)) return;
         const t = this.c.currentTime, rn = clamp((s.rpm - 1000) / 6500, 0, 1), f = s.rpm / 15, set = (p, v, k = 0.05) => p.setTargetAtTime(v, t, k), ev = this.ev;
         this.o[0].frequency.setTargetAtTime(f, t, 0.04); this.o[1].frequency.setTargetAtTime(f, t, 0.04); this.o[2].frequency.setTargetAtTime(f / 2, t, 0.04);
         set(this.lp.frequency, 500 + rn * 3200 + s.thr * 1800, 0.06);
@@ -53,9 +53,11 @@ export class Sound {
         set(this.road.g.gain, (s.kmh / 300) * 0.09);
         set(this.skid.g.gain, s.slide * 0.22); set(this.skid.f.frequency, 1100 + s.slide * 900); set(this.skid2.g.gain, s.slide * 0.05);
         set(this.scrape.g.gain, s.scrape * 0.3 * (0.7 + 0.3 * Math.random()), 0.03);
-        if (this.prevThr > 0.6 && s.thr < 0.2 && rn > 0.5) { this.blow(); for (let i = 0; i < 3; i++) setTimeout(() => this.burst('bandpass', 220 + Math.random() * 100, 2, 0.35, 0.09), 60 + i * 90 + Math.random() * 60); }
+        if (this.prevThr > 0.6 && s.thr < 0.2 && rn > 0.5) { this.blow(); for (let i = 0; i < 3; i++) this.later(() => this.burst('bandpass', 220 + Math.random() * 100, 2, 0.35, 0.09), 60 + i * 90 + Math.random() * 60); }
         this.prevThr = s.thr;
     }
+
+    later(fn, ms) { const id = setTimeout(() => { this.timers.delete(id); fn(); }, ms); this.timers.add(id); }
 
     burst(type, freq, q, gain, dur, hp = 0) {
         const c = this.c, t = c.currentTime, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
@@ -85,5 +87,5 @@ export class Sound {
 
     beep(f, dur = 0.18) { if (this.c) { this.tone(f, dur); this.tone(f * 2, dur, 'sine', 0.06); } }
     chime() { if (this.c) { this.tone(784, 0.3, 'sine', 0.2); this.tone(1175, 0.5, 'sine', 0.2, 0.12); } }
-    stop() { if (!this.c) return; const t = this.c.currentTime;[this.eg, this.tg, this.intake.g, this.wind.g, this.road.g, this.skid.g, this.skid2.g, this.scrape.g].forEach((n) => n.gain.setTargetAtTime(0, t, 0.05)); }
+    stop() { if (!this.c) return; this.timers.forEach(clearTimeout); this.timers.clear(); const t = this.c.currentTime;[this.eg, this.tg, this.intake.g, this.wind.g, this.road.g, this.skid.g, this.skid2.g, this.scrape.g].forEach((n) => n.gain.setTargetAtTime(0, t, 0.05)); }
 }

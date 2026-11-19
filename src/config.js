@@ -4,6 +4,7 @@ const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer:coarse)
 // ox: 차체 중심의 전방 오프셋, hx/hz: 충돌 박스 반길이/반폭
 export const CARS = [
     { id: 'f458', name: '458 이탈리아', desc: '미드십 V8 · 실차 3D 모델', model: 'ferrari', mass: 1380, power: 1.2, top: 84, grip: 2.7, color: '#d1142a', hx: 2.26, hz: 0.97, ox: 0.2 },
+    { id: 'cc', name: '컨셉 GT', desc: '중앙 운전석 미드십 하이퍼카 · 3D 모델', model: 'concept', mass: 1250, power: 1.25, top: 86, grip: 2.7, color: '#d4141c', hx: 2.2, hz: 0.98, ox: 0.15 },
     { id: 'vx', name: 'VX 쿠페', desc: '균형 잡힌 후륜 쿠페', mass: 1150, power: 1.0, top: 68, grip: 2.5, color: '#2fb6e8', hx: 2.15, hz: 0.93, ox: 0 },
     { id: 'gt', name: 'GT 머슬', desc: '무겁지만 토크가 강력', mass: 1400, power: 1.22, top: 71, grip: 2.3, color: '#f2b632', hx: 2.15, hz: 0.93, ox: 0 },
 ];
@@ -19,9 +20,9 @@ export const QUALITY = [
     { pr: 2, shadow: 4096, fog: 900, bloom: 1, msaa: 4, trees: 1 },
 ];
 export const TIMES = {
-    dusk: { name: '황혼', top: 0x1a2048, mid: 0x6a4a78, hor: 0xf08a55, fog: 0x7a587a, sun: 0xffa65e, sunI: 2.8, sky: [0x9a9cd8, 0x2c2430, 1.0], dir: [-0.55, 0.28, -0.78], win: 0.9, lamp: 1, stars: 0, head: 500, exp: 1.0 },
-    night: { name: '밤', top: 0x03061a, mid: 0x0b1230, hor: 0x1a2148, fog: 0x0d1230, sun: 0x8aa4ff, sunI: 0.7, sky: [0x4a5aa0, 0x080a14, 0.8], dir: [0.3, 0.5, 0.6], win: 1.2, lamp: 1, stars: 1, head: 900, exp: 1.1 },
-    day: { name: '낮', top: 0x2f74d0, mid: 0x86bdf0, hor: 0xe6f1ff, fog: 0xbdd5ea, sun: 0xfff0d8, sunI: 3.4, sky: [0xbfd8ff, 0x58604a, 1.2], dir: [-0.45, 0.8, -0.35], win: 0.08, lamp: 0, stars: 0, head: 0, exp: 0.95 },
+    dusk: { name: '황혼', top: 0x1a2048, mid: 0x6a4a78, hor: 0xf08a55, fog: 0x7a587a, sun: 0xffa65e, sunI: 2.4, sky: [0x9a9cd8, 0x2c2430, 0.85], dir: [-0.55, 0.28, -0.78], win: 0.75, lamp: 1, stars: 0, head: 380, exp: 1.0 },
+    night: { name: '밤', top: 0x03061a, mid: 0x0b1230, hor: 0x1a2148, fog: 0x0d1230, sun: 0x8aa4ff, sunI: 0.6, sky: [0x4a5aa0, 0x080a14, 0.7], dir: [0.3, 0.5, 0.6], win: 1.0, lamp: 1, stars: 1, head: 700, exp: 1.05 },
+    day: { name: '낮', top: 0x2f74d0, mid: 0x86bdf0, hor: 0xe6f1ff, fog: 0xbdd5ea, sun: 0xfff0d8, sunI: 3.0, sky: [0xbfd8ff, 0x58604a, 1.05], dir: [-0.45, 0.8, -0.35], win: 0.08, lamp: 0, stars: 0, head: 0, exp: 0.9 },
 };
 export const TRACKS = [
     {
@@ -31,6 +32,10 @@ export const TRACKS = [
     {
         id: 'riverside', name: '리버사이드 스프린트', desc: '넓은 곡선이 이어지는 강변 코스', seed: 21, scale: 1.1, buildings: 150, trees: 320,
         pts: [[0, -260], [210, -250], [330, -110], [260, 30], [340, 170], [160, 280], [-40, 220], [-110, 90], [-300, 130], [-360, -70], [-210, -230]]
+    },
+    {
+        id: 'harbor', name: '하버 나이트 서킷', desc: '헤어핀과 시케인이 이어지는 기술적인 항구 코스', seed: 33, scale: 1.15, buildings: 160, trees: 200,
+        pts: [[0, -220], [160, -230], [300, -150], [330, -10], [260, 90], [290, 200], [180, 290], [40, 250], [-40, 150], [-150, 190], [-280, 120], [-320, -20], [-240, -120], [-130, -90], [-60, -170]]
     },
 ];
 export const DEFAULTS = { quality: coarse ? 1 : 3, master: 0.8, engine: 0.7, fov: 70, cam: 'chase', shift: 'auto', assist: 1, steer: 1, mouse: false, touch: 'auto', units: 'kmh', map: true, time: 'dusk' };

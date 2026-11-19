@@ -12,7 +12,7 @@ export class Input {
             if (PULSE[e.code]) this.pulse[PULSE[e.code]] = 1;
         });
         addEventListener('keyup', (e) => this.keys.delete(e.code));
-        addEventListener('blur', () => this.keys.clear());
+        addEventListener('blur', () => this.reset());
         addEventListener('mousemove', (e) => { this.mx = (e.clientX / innerWidth - 0.5) * 2; });
         addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -24,7 +24,7 @@ export class Input {
                 if (held) this.hold[k] = 1; else this.pulse[k] = 1;
             });
             const up = () => { el.classList.remove('on'); if (held) this.hold[k] = 0; };
-            el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+            el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up); el.addEventListener('lostpointercapture', up);
         });
 
         // 화면 핸들: 드래그한 각도만큼 조향
@@ -37,7 +37,14 @@ export class Input {
             this.wheelVal = clamp(v0 + Math.atan2(Math.sin(d), Math.cos(d)) / 2.2, -1, 1);
         });
         const end = (e) => { if (e.pointerId === id) { id = null; this.wheelVal = null; } };
-        wheelEl.addEventListener('pointerup', end); wheelEl.addEventListener('pointercancel', end);
+        wheelEl.addEventListener('pointerup', end); wheelEl.addEventListener('pointercancel', end); wheelEl.addEventListener('lostpointercapture', end);
+    }
+
+    // 창 포커스를 잃거나 일시정지할 때 눌린 상태가 남지 않도록 모두 해제한다
+    reset() {
+        this.keys.clear(); this.pulse = {}; this.wheelVal = null; this.thr = 0;
+        for (const k in this.hold) this.hold[k] = 0;
+        document.querySelectorAll('[data-k].on').forEach((el) => el.classList.remove('on'));
     }
 
     take(n) { const v = this.pulse[n]; this.pulse[n] = 0; return v; }
@@ -54,16 +61,17 @@ export class Input {
         if (this.wheelVal !== null) this.steer = this.wheelVal;
         else if (gs !== null && !kb) this.steer += clamp(gs - this.steer, -dt * 10, dt * 10);
         else {
-            // 키보드: 속도가 높을수록 천천히 꺾고, 놓으면 빠르게 중앙으로 복귀
-            const target = kb || (this.mouseSteer ? clamp(this.mx * 1.6, -1, 1) : 0);
-            const rate = kb ? 4.2 * sens * (1 - clamp(kmh / 220, 0, 1) * 0.6) : this.mouseSteer ? 8 : 5 + clamp(kmh / 60, 0, 2);
+            // 키보드: 누르는 동안 핸들이 부드럽게 꺾여 유지되고, 놓으면 중앙으로 천천히 복귀한다
+            const fast = clamp(kmh / 200, 0, 1), target = kb || (this.mouseSteer ? clamp(this.mx * 1.6, -1, 1) : 0);
+            let rate = kb ? (2.8 - 1.2 * fast) * sens : this.mouseSteer ? 8 : 3.2 + fast * 1.5;
+            if (kb && this.steer * kb < 0) rate *= 1.8;
             this.steer += clamp(target - this.steer, -rate * dt, rate * dt);
         }
         const gas = (k.has('ArrowUp') || k.has('KeyW') ? 1 : 0) || this.hold.thr || gt;
         this.thr += clamp(gas - this.thr, -dt * 8, dt * 5);
         this.wheelEl.firstElementChild.style.transform = `rotate(${this.steer * 126}deg)`;
         return {
-            steer: this.steer * (0.5 + 0.5 * Math.abs(this.steer)), rawSteer: this.steer, thr: this.thr,
+            steer: this.steer, rawSteer: this.steer, thr: this.thr,
             brk: (k.has('ArrowDown') || k.has('KeyS') ? 1 : 0) || this.hold.brk || gb, hand: k.has('Space') ? 1 : this.hold.hand || gh,
         };
     }

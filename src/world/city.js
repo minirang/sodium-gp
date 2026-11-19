@@ -149,8 +149,8 @@ export function buildTrack(def, density = 1) {
     for (let i = 0; i < N; i += 9) for (const sd of [-1, 1]) { const s = S[i], o = sd * (W / 2 + 3.6); lamps.push({ x: s.p.x + s.n.x * o, z: s.p.z + s.n.z * o, sd, s }); }
     const poles = inst(new THREE.CylinderGeometry(0.09, 0.13, 7.5, 6).translate(0, 3.75, 0), new THREE.MeshStandardMaterial({ color: 0x2a2d35 }), lamps.length, (i) => D.position.set(lamps[i].x, 0, lamps[i].z));
     poles.castShadow = true;
-    const heads = inst(new THREE.BoxGeometry(1.5, 0.14, 0.5), new THREE.MeshBasicMaterial({ color: 0xffd08a }), lamps.length, (i) => { const l = lamps[i]; D.position.set(l.x - l.s.n.x * l.sd * 0.8, 7.5, l.z - l.s.n.z * l.sd * 0.8); D.rotation.y = l.s.yaw; });
-    const pools = inst(new THREE.PlaneGeometry(18, 18).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: glow, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), lamps.length, (i) => { const l = lamps[i]; D.position.set(l.x - l.s.n.x * l.sd * 5, 0.1, l.z - l.s.n.z * l.sd * 5); });
+    const heads = inst(new THREE.BoxGeometry(1.5, 0.14, 0.5), new THREE.MeshBasicMaterial({ color: 0xf0c27c }), lamps.length, (i) => { const l = lamps[i]; D.position.set(l.x - l.s.n.x * l.sd * 0.8, 7.5, l.z - l.s.n.z * l.sd * 0.8); D.rotation.y = l.s.yaw; });
+    const pools = inst(new THREE.PlaneGeometry(18, 18).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: glow, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }), lamps.length, (i) => { const l = lamps[i]; D.position.set(l.x - l.s.n.x * l.sd * 5, 0.1, l.z - l.s.n.z * l.sd * 5); });
 
     // 가로수와 공원 나무
     const trees = [], startZone = (i) => i < 26 || i > N - 26;
@@ -216,11 +216,15 @@ export function buildTrack(def, density = 1) {
         group.add(g);
     }
 
+    // 코스는 움직이지 않으므로 행렬 자동 갱신을 끈다
+    group.traverse((o) => { o.updateMatrix(); o.matrixAutoUpdate = false; });
+
     return {
         group, S, N, len, def, W, limit: LIM,
         grid(k) {
             const s = S[0], row = k >> 1, col = k & 1;
-            return { pos: s.p.clone().addScaledVector(s.t, -(8 + row * 9)).addScaledVector(s.n, col ? 3.4 : -3.4), yaw: s.yaw };
+            // 엇갈린 그리드: 한 줄 간격을 넓히고 왼쪽 열을 앞으로 내보내 나란히 출발하는 충돌을 줄인다
+            return { pos: s.p.clone().addScaledVector(s.t, -(8 + row * 12 + (col ? 6 : 0))).addScaledVector(s.n, col ? 3.2 : -3.2), yaw: s.yaw };
         },
         setTime(t) { cityMat.emissiveIntensity = t.win; pools.visible = heads.visible = !!t.lamp; },
         update(time) { water.offset.y = -time * 0.04; },
@@ -238,7 +242,10 @@ export function buildTrack(def, density = 1) {
             };
         },
         dispose() {
-            group.traverse((o) => { o.geometry?.dispose(); const m = o.material; if (m) { m.map?.dispose(); m.emissiveMap?.dispose(); m.dispose(); } });
+            group.traverse((o) => {
+                o.geometry?.dispose(); o.dispose?.();
+                for (const m of [].concat(o.material || [])) { m.map?.dispose(); m.emissiveMap?.dispose(); m.dispose(); }
+            });
         },
     };
 }

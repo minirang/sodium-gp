@@ -5,12 +5,12 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { store } from './store.js';
-import { CARS, TRACKS, AI_LEVELS, QUALITY, LAPS, COLORS } from './config.js';
+import { CARS, TRACKS, AI_LEVELS, QUALITY, LAPS, COLORS, RIM_COLORS, SPOKES } from './config.js';
 import { buildTrack } from './world/city.js';
 import { makeSky } from './world/sky.js';
 import { buildCar } from './vehicle/model.js';
 import { Car } from './vehicle/car.js';
-import { AI } from './vehicle/ai.js';
+import { AI, PERSONAS } from './vehicle/ai.js';
 import { resolveWalls } from './vehicle/walls.js';
 import { Input } from './systems/input.js';
 import { Sound } from './systems/audio.js';
@@ -18,10 +18,12 @@ import { Fx } from './systems/fx.js';
 import { Hud, fmt } from './ui/hud.js';
 import { show, showResult } from './ui/ui.js';
 
+const STEP = 1 / 60;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const IDLE = { steer: 0, thr: 0, brk: 0, hand: 0, auto: true };
 const Y90 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+const V = new THREE.Vector3(), V2 = new THREE.Vector3(), Q = new THREE.Quaternion(), Q2 = new THREE.Quaternion(), EU = new THREE.Euler();
 
 export class Game {
     constructor() {
@@ -30,25 +32,27 @@ export class Game {
         this.r.shadowMap.type = THREE.PCFSoftShadowMap;
         this.scene = new THREE.Scene();
         this.scene.fog = new THREE.Fog(0x7a587a, 40, 500);
-        this.cam = new THREE.PerspectiveCamera(60, 1, 0.1, 1800);
+        this.cam = new THREE.PerspectiveCamera(48, 1, 0.1, 1800);
         this.sky = makeSky(); this.scene.add(this.sky.mesh);
         this.hemi = new THREE.HemisphereLight(); this.scene.add(this.hemi);
         const sun = this.sun = new THREE.DirectionalLight(0xffffff, 1), sc = sun.shadow.camera;
-        sc.left = sc.bottom = -80; sc.right = sc.top = 80; sc.near = 1; sc.far = 400;
+        sc.left = sc.bottom = -95; sc.right = sc.top = 95; sc.near = 1; sc.far = 420;
         sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05;
         this.scene.add(sun, sun.target);
         this.pmrem = new THREE.PMREMGenerator(this.r);
         this.fx = new Fx(this.scene);
 
-        Object.assign(this, { input: new Input(document.getElementById('wheel')), sound: new Sound(), hud: new Hud(), mode: 'menu', cars: [], paused: false, shake: 0, oa: 0, time: 0, chase: { yaw: 0, init: false } });
+        Object.assign(this, { input: new Input(document.getElementById('wheel')), sound: new Sound(), hud: new Hud(), mode: 'menu', cars: [], paused: false, shake: 0, oa: 0, time: 0, acc: 0, timers: new Set(), runId: 0, upP: 0, downP: 0, pin: { auto: true, up: 0, down: 0, assist: 0 }, chase: { yaw: 0, init: false }, focus: new THREE.Vector3(), fovCur: 70, lastBack: false });
         this.camMode = store.settings.cam;
         this.applySettings();
         addEventListener('resize', () => this.resize());
-        document.addEventListener('visibilitychange', () => { if (document.hidden && (this.mode === 'race' || this.mode === 'count')) this.pause(true); });
+        document.addEventListener('visibilitychange', () => { if (document.hidden) { this.input.reset(); if (this.mode === 'race' || this.mode === 'count') this.pause(true); } });
         this.setTrack(store.track);
         this.clock = new THREE.Clock();
         this.r.setAnimationLoop(() => this.frame());
     }
+
+    later(fn, ms) { const run = this.runId, id = setTimeout(() => { this.timers.delete(id); if (run === this.runId) fn(); }, ms); this.timers.add(id); }
 
     applySettings() {
         const s = store.settings, q = this.q = QUALITY[s.quality], had = this.r.shadowMap.enabled;
@@ -62,12 +66,13 @@ export class Game {
         this.input.mouseSteer = !!s.mouse;
         document.body.classList.toggle('touch', s.touch === 'on' || (s.touch === 'auto' && matchMedia('(pointer:coarse)').matches));
         if (this.qId !== s.quality) {
-            this.qId = s.quality; this.comp?.dispose?.();
+            this.qId = s.quality;
+            if (this.comp) { this.comp.renderTarget1.dispose(); this.comp.renderTarget2.dispose(); }
             if (q.bloom) {
                 const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: q.msaa });
                 this.comp = new EffectComposer(this.r, rt);
                 this.comp.addPass(new RenderPass(this.scene, this.cam));
-                this.comp.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.5, 0.55, 0.9));
+                this.comp.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.55, 0.95));
                 this.comp.addPass(new OutputPass());
             } else this.comp = null;
         }
@@ -106,43 +111,60 @@ export class Game {
     }
 
     showPreview() {
-        if (this.prev) this.scene.remove(this.prev);
-        const m = buildCar(store.look), s = this.track.S[0];
+        if (this.prev) { this.scene.remove(this.prev.group); this.prev.dispose(); }
+        const m = this.prev = buildCar(store.look), s = this.track.S[0];
         m.wheels.forEach((w, i) => { w.position.copy(m.wheelPts[i]); m.group.add(w); });
         m.brake(false);
         m.group.position.set(s.p.x, 0.61, s.p.z); m.group.rotation.y = s.yaw;
-        this.prev = m.group; this.scene.add(m.group);
+        this.scene.add(m.group);
     }
 
+    clearPreview() { if (this.prev) { this.scene.remove(this.prev.group); this.prev.dispose(); this.prev = null; } }
+
     begin() {
+        this.clearTimers(); this.runId++;
         this.sound.init(); this.sound.volume(store.settings.master, store.settings.engine);
         show('#menu', false); show('#gfxTip', false); this.hud.show(true);
-        if (this.prev) { this.scene.remove(this.prev); this.prev = null; }
+        this.clearPreview();
         const w = this.world = new C.World({ gravity: new C.Vec3(0, -9.82, 0) });
         w.defaultContactMaterial.friction = 0.15; w.defaultContactMaterial.restitution = 0.1;
         this.track.addPhysics(w);
 
-        const L = store.look, ps = CARS.find((c) => c.id === L.car), lv = AI_LEVELS[store.ai], rnd = Math.random, pool = COLORS.filter((c) => c !== L.color);
-        let a = 0;
+        const L = store.look, ps = CARS.find((c) => c.id === L.car), lv = AI_LEVELS[store.ai].skill, rnd = Math.random;
+        const personas = [...PERSONAS].sort(() => rnd() - 0.5), colors = COLORS.filter((c) => c !== L.color);
+        let a = 0, ferrari = 0;
         this.cars = [0, 1, 2, 3, 4, 5].map((k) => {
             const pose = this.track.grid(k);
-            let car;
-            if (k === 3) { car = new Car(w, this.scene, ps, L, pose, { cockpit: true, lights: true }); car.name = '나'; this.player = car; }
+            let car, persona;
+            if (k === 3) { car = new Car(w, this.scene, ps, L, pose, { cockpit: true, lights: true }); car.name = '나'; this.player = car; persona = PERSONAS[4]; }
             else {
-                const look = { car: 'f458', color: pool[(a * 3 + 1) % pool.length], rim: '#d9dde6', wheel: 0.36, spokes: 5 };
-                const spec = { ...ps, hx: 2.26, hz: 0.97, ox: 0.2, power: ps.power * (0.97 + rnd() * 0.06) };
-                car = new Car(w, this.scene, spec, look, pose, { lod: true }); car.name = `AI ${a + 1}`; a++;
+                // AI 차량은 매번 무작위로 고른다 (무거운 Ferrari 모델은 최대 1대)
+                let pick; do { pick = CARS[Math.floor(rnd() * CARS.length)]; } while (pick.id === 'f458' && ferrari >= 1);
+                if (pick.id === 'f458') ferrari++;
+                persona = personas[a];
+                const look = { car: pick.id, color: colors[Math.floor(rnd() * colors.length)], rim: RIM_COLORS[Math.floor(rnd() * RIM_COLORS.length)], wheel: 0.36, spokes: SPOKES[Math.floor(rnd() * 3)] };
+                const spec = { ...ps, hx: pick.hx, hz: pick.hz, ox: pick.ox, power: ps.power * (0.97 + rnd() * 0.06) };
+                car = new Car(w, this.scene, spec, look, pose, { lod: true }); car.name = `AI ${a + 1}`; car.tag = persona.name; a++;
                 if (this.q.shadow < 2048) { car.mesh.traverse((o) => { o.castShadow = false; }); car.wheels.forEach((x) => x.traverse((o) => { o.castShadow = false; })); }
             }
-            car.ai = new AI(car, this.track.S, k === 3 ? 0.7 : lv.skill * (0.96 + rnd() * 0.08), k === 3 ? 0 : [-3.5, 3.5, -1.5, 1.5, 0][a - 1], rnd() * 6);
-            car.hit = (v) => { if (car === this.player) { this.sound.hit(v); this.shake = Math.min(1, v / 18); } };
             this.initIdx(car);
+            car.ai = new AI(car, this.track.S, k === 3 ? 0.7 : lv * (0.97 + rnd() * 0.06), persona, rnd() * 6);
+            car.startAt = k === 3 ? 0 : car.ai.react;
+            car.hit = (v) => { if (car === this.player) { this.sound.hit(v); this.shake = Math.min(1, v / 18); } };
             return car;
         });
         this.player.onShift = (up, thr) => this.sound.shift(up, thr);
         this.player.lights.forEach((l) => { l.intensity = this.tm.head; });
-        Object.assign(this, { mode: 'count', cd: 6, time: 0, lit: -1, paused: false, camMode: store.settings.cam, order: this.cars });
-        this.chase.init = false; this.input.pulse = {}; this.hud.setLights(0);
+        // 5개 신호등이 1초 간격으로 켜진 뒤, 무작위 시간(0.4~1.4초) 후 꺼지면 출발
+        Object.assign(this, { mode: 'count', cdT: 0, goAt: 5 + 0.4 + rnd(), time: 0, lit: -1, paused: false, acc: 0, camMode: store.settings.cam, order: this.cars });
+        this.cam.fov = this.fovCur = store.settings.fov; this.cam.near = this.camMode === 'cockpit' ? 0.05 : 0.2; this.cam.updateProjectionMatrix();
+        this.chase.init = false; this.input.reset(); this.hud.clear();
+    }
+
+    go() {
+        this.mode = 'race'; this.time = 0; this.player.hold = false;
+        this.hud.setLights(0); this.sound.beep(880, 0.5); this.hud.e.count.textContent = 'GO';
+        this.later(() => { this.hud.e.count.textContent = ''; }, 900);
     }
 
     initIdx(c) {
@@ -150,21 +172,31 @@ export class Game {
         S.forEach((s, i) => { const d = (s.p.x - p.x) ** 2 + (s.p.z - p.z) ** 2; if (d < bd) { bd = d; c.idx = i; } });
     }
 
+    clearTimers() { this.timers.forEach(clearTimeout); this.timers.clear(); }
+
     cleanup() {
+        this.clearTimers(); this.runId++;
         this.cars.forEach((c) => c.dispose()); this.cars = []; this.world = null; this.player = null;
-        this.sound.stop(); this.fx.clear(); this.hud.show(false); this.hud.setLights(0); this.hud.e.count.textContent = ''; this.hud.e.flash.textContent = ''; this.mode = 'menu';
+        this.sound.stop(); this.fx.clear(); this.hud.show(false); this.hud.clear(); this.input.reset(); this.mode = 'menu';
     }
 
-    toMenu() { this.cleanup(); this.paused = false; show('#menu'); this.showPreview(); }
+    toMenu() {
+        this.cleanup(); this.paused = false; show('#menu');
+        this.cam.fov = 48; this.cam.near = 0.1; this.cam.updateProjectionMatrix();
+        this.showPreview();
+    }
     restart() { this.cleanup(); this.begin(); }
 
     pause(v) {
         if (this.mode === 'menu' || this.mode === 'done' || this.paused === v) return;
-        this.paused = v; show('#pause', v);
+        this.paused = v; show('#pause', v); this.input.reset();
         if (v) { this.sound.stop(); this.sound.c?.suspend(); } else this.sound.c?.resume();
     }
 
-    respawn(c) { const s = this.track.S[c.idx]; c.place({ pos: s.p, yaw: s.yaw }); }
+    respawn(c) {
+        const s = this.track.S[c.idx]; c.place({ pos: s.p, yaw: s.yaw });
+        if (c === this.player) this.chase.init = false;
+    }
 
     trackProgress(c) {
         const S = this.track.S, N = S.length, p = c.body.position;
@@ -173,7 +205,8 @@ export class Game {
             const j = (c.idx + k + N) % N, d = (S[j].p.x - p.x) ** 2 + (S[j].p.z - p.z) ** 2;
             if (d < bd) { bd = d; b = j; }
         }
-        if (c.idx > N * 0.75 && b < N * 0.25) { c.lap++; this.lapDone(c); }
+        // 랩은 새로운 최대 진행도를 넘을 때만 인정한다 (역주행 후 재통과로 중복 집계되지 않음)
+        if (c.idx > N * 0.75 && b < N * 0.25) { c.lap++; if (c.lap > c.maxLap) { c.maxLap = c.lap; this.lapDone(c); } }
         else if (c.idx < N * 0.25 && b > N * 0.75) c.lap--;
         c.idx = b; c.prog = c.lap * N + b;
     }
@@ -187,13 +220,13 @@ export class Game {
         c.lapT = this.time;
         if (c.lap > LAPS && !c.finished) {
             c.finished = true; c.finishT = this.time;
-            if (c === this.player) { this.mode = 'done'; setTimeout(() => this.results(), 2500); }
+            if (c === this.player) { this.mode = 'done'; this.later(() => this.results(), 2500); }
         }
     }
 
     results() {
         if (this.mode !== 'done') return;
-        showResult(this.order.map((c) => ({ name: c.name, me: c === this.player, time: c.finished ? c.finishT : null, best: c.laps.length ? Math.min(...c.laps) : null })));
+        showResult(this.order.map((c) => ({ name: c.name, tag: c.tag, me: c === this.player, time: c.finished ? c.finishT : null, best: c.laps.length ? Math.min(...c.laps) : null })));
     }
 
     frame() {
@@ -210,31 +243,27 @@ export class Game {
 
     orbit(dt) {
         const s = this.track.S[0]; this.oa += dt * 0.22;
-        this.cam.fov = 48; this.cam.updateProjectionMatrix();
         this.cam.position.set(s.p.x + Math.cos(this.oa) * 6.5, 1.5 + Math.sin(this.oa * 0.7) * 0.4, s.p.z + Math.sin(this.oa) * 6.5);
         this.cam.lookAt(s.p.x, 0.7, s.p.z);
         this.lightAt(s.p);
     }
 
-    lightAt(p) { this.sun.target.position.copy(p); this.sun.position.copy(p).addScaledVector(this.dir, 150); }
+    // 그림자 카메라가 움직일 때 생기는 깜빡임을 줄이려고 목표점을 격자에 맞춘다
+    lightAt(p) {
+        const x = Math.round(p.x * 2) / 2, z = Math.round(p.z * 2) / 2;
+        this.sun.target.position.set(x, 0, z); this.sun.position.set(x, 0, z).addScaledVector(this.dir, 150);
+    }
 
-    simulate(dt) {
-        const inp = this.input, st = store.settings, pl = this.player, pi = inp.read(dt, st.steer, pl.kmh), S = this.track.S;
-        if (inp.take('cam')) this.camMode = this.camMode === 'chase' ? 'cockpit' : 'chase';
-        if (inp.take('reset') && this.mode === 'race') this.respawn(pl);
-        const up = inp.take('up'), down = inp.take('down');
+    // 완주한 플레이어: 코스를 따라 직진하며 서서히 정지
+    coast(c) {
+        const a = c.ai.drive(STEP, this.cars);
+        return { steer: a.steer, thr: 0, brk: c.kmh > 6 ? 0.55 : 1, hand: 0, auto: true };
+    }
 
-        if (this.mode === 'count') {
-            this.cd -= dt;
-            const lit = clamp(Math.floor(6 - this.cd), 0, 5);
-            if (lit !== this.lit) { this.lit = lit; this.hud.setLights(lit); if (lit > 0) this.sound.beep(380 + lit * 40, 0.14); }
-            if (this.cd <= 0) {
-                this.mode = 'race'; this.cars.forEach((c) => { c.hold = false; }); this.hud.setLights(0); this.sound.beep(880, 0.5);
-                this.hud.e.count.textContent = 'GO'; setTimeout(() => { this.hud.e.count.textContent = ''; }, 900);
-            }
-        } else this.time += dt;
+    step(pi, st) {
+        const pl = this.player, S = this.track.S;
+        if (this.mode === 'count') { this.cdT += STEP; if (this.cdT >= this.goAt) this.go(); } else this.time += STEP;
 
-        // 슬립스트림: 앞차 바로 뒤에서 구동력 보너스
         for (const c of this.cars) {
             c.draft = 0;
             if (c.kmh < 25) continue;
@@ -248,20 +277,39 @@ export class Game {
 
         for (const c of this.cars) {
             let i = IDLE;
-            if (this.mode !== 'count') i = c === pl && !c.finished ? { ...pi, auto: st.shift === 'auto', up, down, assist: st.assist } : c.ai.drive(dt);
-            c.update(dt, i);
+            if (c === pl) {
+                if (pl.finished) i = this.coast(pl);
+                else { Object.assign(this.pin, pi, { auto: st.shift === 'auto', up: this.upP, down: this.downP, assist: st.assist }); this.upP = this.downP = 0; i = this.pin; }
+            } else if (this.mode !== 'count' && !c.hold) i = c.ai.drive(STEP, this.cars);
+            if (this.mode !== 'count' && c.hold && this.time >= c.startAt) c.hold = false;
+            c.update(STEP, i);
             if (c !== pl && c.ai.stuck > 3) { this.respawn(c); c.ai.stuck = 0; }
             if (c.flipT > 2) { this.respawn(c); c.flipT = 0; }
         }
-        this.world.step(1 / 60, dt, 3);
-
-        const cockpit = this.camMode === 'cockpit';
+        for (const c of this.cars) c.snap();
+        this.world.step(STEP);
         for (const c of this.cars) {
-            this.trackProgress(c);
+            c.capture(); this.trackProgress(c);
             const w = resolveWalls(c, this.track);
             if (w > 2.5) c.hit?.(w);
             if (c.scrape > 0.12 && c.kmh > 25 && c.contact && Math.random() < 0.6) this.fx.spark(c.contact[0], c.contact[1], c.body.velocity.x, c.body.velocity.z);
-            c.sync(c === pl && cockpit);
+        }
+    }
+
+    simulate(dt) {
+        const inp = this.input, st = store.settings, pl = this.player, pi = inp.read(dt, st.steer, pl.kmh), S = this.track.S;
+        if (inp.take('cam')) { this.camMode = this.camMode === 'chase' ? 'cockpit' : 'chase'; this.cam.near = this.camMode === 'cockpit' ? 0.05 : 0.2; this.cam.updateProjectionMatrix(); this.chase.init = false; }
+        if (inp.take('reset') && this.mode === 'race') this.respawn(pl);
+        this.upP ||= inp.take('up') || 0; this.downP ||= inp.take('down') || 0;
+
+        // 고정 스텝 물리 + 렌더 보간: 프레임레이트와 무관하게 같은 속도로 움직이고 떨림이 없다
+        this.acc += dt;
+        for (let n = 0; this.acc >= STEP && n < 4; n++, this.acc -= STEP) this.step(pi, st);
+        if (this.acc > STEP) this.acc = 0;
+        const alpha = this.acc / STEP, cockpit = this.camMode === 'cockpit';
+
+        for (const c of this.cars) {
+            c.render(alpha, c === pl && cockpit);
             const sk = c.slide > 0.35 && c.kmh > 20, brk = c.braking && c.kmh > 90;
             for (let i = 0; i < 4; i++) {
                 const on = (sk && i >= 2) || (brk && c.slide > 0.15) || (sk && i < 2 && c.slide > 0.7);
@@ -274,36 +322,49 @@ export class Game {
         const pos = order.indexOf(pl), sp = Math.max(pl.kmh / 3.6, 20), g = (o) => (Math.abs(o.prog - pl.prog) * S.step / sp).toFixed(1);
         const gap = `${order[pos - 1] ? `▲ ${g(order[pos - 1])}s` : ''}${order[pos - 1] && order[pos + 1] ? '   ' : ''}${order[pos + 1] ? `▼ ${g(order[pos + 1])}s` : ''}`;
         const t = S[pl.idx].t, v = pl.body.velocity;
-        this.hud.update({ pos: pos + 1, total: this.cars.length, lap: pl.lap, time: this.time, best: pl.laps.length ? Math.min(...pl.laps) : 0, kmh: pl.kmh, gear: pl.gear, reverse: pl.reverse, manual: st.shift === 'manual', rpm: pl.rpm, cars: this.cars, player: pl, gap, wrong: pl.kmh > 12 && v.x * t.x + v.z * t.z < -pl.kmh / 7, draft: pl.draft > 0.15 });
+        if (this.mode === 'count') {
+            const lit = clamp(Math.floor(this.cdT), 0, 5);
+            if (lit !== this.lit) { this.lit = lit; this.hud.setLights(lit); if (lit > 0) this.sound.beep(380 + lit * 40, 0.14); }
+        }
+        this.hud.update({ pos: pos + 1, total: this.cars.length, lap: pl.lap, time: this.mode === 'count' ? 0 : this.time, best: pl.laps.length ? Math.min(...pl.laps) : 0, kmh: pl.kmh, gear: pl.gear, reverse: pl.reverse, manual: st.shift === 'manual', rpm: pl.rpm, cars: this.cars, player: pl, gap, wrong: this.mode === 'race' && pl.kmh > 12 && v.x * t.x + v.z * t.z < -pl.kmh / 7, draft: pl.draft > 0.15 });
         this.sound.drive({ rpm: pl.rpm, thr: pi.thr, kmh: pl.kmh, slide: pl.slide, scrape: pl.scrape });
         this.updateCamera(dt);
         this.fx.update(dt, this.cam.quaternion);
     }
 
     updateCamera(dt) {
-        const c = this.player, b = c.body, cam = this.cam, back = this.input.back;
-        const q = new THREE.Quaternion(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w), p = new THREE.Vector3(b.position.x, b.position.y, b.position.z);
-        const fov = store.settings.fov + clamp(c.kmh - 80, 0, 140) * 0.1;
-        if (Math.abs(cam.fov - fov) > 0.05) { cam.fov += (fov - cam.fov) * Math.min(1, dt * 4); cam.updateProjectionMatrix(); }
+        const c = this.player, cam = this.cam, st = store.settings, back = this.input.back, p = c.mesh.position, f = this.focus;
+        // 화면에 보이는(보간된) 차량 위치를 기준으로 하고, 상하 흔들림만 부드럽게 걸러낸다
+        if (!this.chase.init) f.copy(p); else { f.x = p.x; f.z = p.z; f.y += (p.y - f.y) * (1 - Math.exp(-dt * 4)); }
+
+        // 시야각 변화는 작고 느리게: 속도에 따라 크기가 출렁이는 느낌을 없앤다
+        const tf = st.fov + clamp((c.kmh - 100) / 150, 0, 1) * 5;
+        this.fovCur += (tf - this.fovCur) * (1 - Math.exp(-dt * 1.5));
+        if (Math.abs(cam.fov - this.fovCur) > 0.03) { cam.fov = this.fovCur; cam.updateProjectionMatrix(); }
+
+        const ch = this.chase, carYaw = Math.atan2(-c.fwd.z, c.fwd.x), vel = c.body.velocity;
         if (this.camMode === 'cockpit') {
-            cam.position.copy(p).add(c.model.eye.clone().applyQuaternion(q));
-            cam.quaternion.copy(q).multiply(Y90).multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0, -c.steerIn * 0.12 + (back ? Math.PI : 0), 0)));
+            // 피치/롤은 일부만 반영해 어지럽지 않게 한다
+            Q.setFromEuler(EU.set(0, carYaw, 0)); Q2.copy(Q).slerp(c.mesh.quaternion, 0.4);
+            cam.position.copy(f).add(V.copy(c.model.eye).applyQuaternion(Q2));
+            cam.quaternion.copy(Q2).multiply(Y90).multiply(Q.setFromEuler(EU.set(0, -c.steerIn * 0.1 + (back ? Math.PI : 0), 0)));
+            ch.init = true;
         } else {
             // 차체 방향과 진행 방향을 섞어 부드럽게 따라가는 추적 카메라
-            const ch = this.chase, carYaw = Math.atan2(-c.fwd.z, c.fwd.x), v = b.velocity;
             let ty = carYaw;
-            if (Math.hypot(v.x, v.z) > 6) ty += wrap(Math.atan2(-v.z, v.x) - carYaw) * 0.45;
+            if (Math.hypot(vel.x, vel.z) > 6) ty += wrap(Math.atan2(-vel.z, vel.x) - carYaw) * 0.45;
             if (back) ty += Math.PI;
-            if (!ch.init) { ch.yaw = ty; ch.init = true; cam.position.copy(p).add(new THREE.Vector3(-Math.cos(ty) * 7, 2.5, Math.sin(ty) * 7)); }
-            ch.yaw += wrap(ty - ch.yaw) * (1 - Math.exp(-dt * (back ? 18 : 5)));
-            const f = new THREE.Vector3(Math.cos(ch.yaw), 0, -Math.sin(ch.yaw)), target = p.clone().addScaledVector(f, -(6.6 + c.kmh * 0.008));
-            target.y += 2.1 + c.kmh * 0.003;
-            cam.position.lerp(target, 1 - Math.exp(-dt * 14)); cam.position.y = Math.max(cam.position.y, 0.8);
-            cam.lookAt(p.clone().addScaledVector(f, 6).add(new THREE.Vector3(0, 1, 0)));
+            if (!ch.init || back !== this.lastBack) { ch.yaw = ty; ch.init = true; V.set(Math.cos(ty), 0, -Math.sin(ty)); cam.position.copy(f).addScaledVector(V, -6.4).setY(f.y + 2.2); }
+            ch.yaw += wrap(ty - ch.yaw) * (1 - Math.exp(-dt * 6));
+            V.set(Math.cos(ch.yaw), 0, -Math.sin(ch.yaw));
+            V2.copy(f).addScaledVector(V, -6.4); V2.y += 2.0;
+            cam.position.lerp(V2, 1 - Math.exp(-dt * 20)); cam.position.y = Math.max(cam.position.y, 0.8);
+            cam.lookAt(V2.copy(f).addScaledVector(V, 6).setY(f.y + 1));
         }
-        this.shake = Math.max(0, this.shake - dt * 2.5);
-        const sh = this.shake * 0.5 + (c.kmh > 200 ? (c.kmh - 200) * 0.0008 : 0);
-        if (sh) cam.position.add(new THREE.Vector3((Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh));
-        this.lightAt(b.position);
+        this.lastBack = back;
+        // 충돌 흔들림: 감쇠하는 사인파 (매 프레임 무작위 떨림 없음)
+        this.shake = Math.max(0, this.shake - dt * 2.2);
+        if (this.shake) { const t = this.clock.elapsedTime * 55, s = this.shake * 0.12; cam.position.x += Math.sin(t) * s; cam.position.y += Math.sin(t * 1.3 + 1) * s; cam.position.z += Math.sin(t * 0.9 + 2) * s; }
+        this.lightAt(f);
     }
 }

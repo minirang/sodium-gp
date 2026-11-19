@@ -11,7 +11,7 @@ export function showResult(rows) {
     $('#resultBody').replaceChildren(...rows.map((r) => {
         const li = document.createElement('li');
         li.className = r.me ? 'me' : '';
-        li.textContent = `${r.name} — ${r.time != null ? fmt(r.time) + (r.time !== win ? ` (+${(r.time - win).toFixed(2)})` : '') : '주행 중'}${r.best ? ` · 베스트 ${fmt(r.best)}` : ''}`;
+        li.textContent = `${r.name}${r.tag ? ` (${r.tag})` : ''} — ${r.time != null ? fmt(r.time) + (r.time !== win ? ` (+${(r.time - win).toFixed(2)})` : '') : '주행 중'}${r.best ? ` · 베스트 ${fmt(r.best)}` : ''}`;
         return li;
     }));
     show('#result');

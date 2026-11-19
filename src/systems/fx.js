@@ -8,6 +8,22 @@ const soft = (() => {
     return new THREE.CanvasTexture(c);
 })();
 
+// 차량 아래 접촉 그림자: 그림자 맵이 꺼진 낮은 품질에서도 항상 보인다
+const blobTex = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 4, 32, 32, 32);
+    g.addColorStop(0, 'rgba(0,0,0,.85)'); g.addColorStop(0.6, 'rgba(0,0,0,.4)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(c);
+})();
+const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, opacity: 0.7, polygonOffset: true, polygonOffsetFactor: -1 });
+const blobGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+export function makeBlob(spec) {
+    const m = new THREE.Mesh(blobGeo, blobMat);
+    m.scale.set(spec.hx * 2.3, 1, spec.hz * 2.7); m.renderOrder = 1; m.frustumCulled = false;
+    return m;
+}
+
 export class Fx {
     constructor(scene) {
         // 스키드 마크: 링 버퍼에 쿼드를 이어 붙인다
