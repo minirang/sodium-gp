@@ -1,85 +1,124 @@
 <!doctype html>
 <html lang="ko">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>SODIUM GP</title>
-<link rel="stylesheet" href="css/main.css">
+    <meta charset="utf-8">
+    <meta name="viewport"
+        content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+    <title>SODIUM GP</title>
+    <link rel="stylesheet" href="css/main.css">
 </head>
+
 <body>
-<canvas id="gl"></canvas>
-<div id="loading">SODIUM GP<small>차량 모델을 불러오는 중…</small></div>
+    <canvas id="gl"></canvas>
+    <div id="loading">SODIUM GP<small>차량 모델을 불러오는 중…</small></div>
 
-<main id="menu">
-  <header class="brand"><h1>SODIUM GP</h1><p>가로등이 켜지는 시간, 도시가 서킷이 된다</p></header>
-  <div class="cols">
-    <section class="panel">
-      <h2>차량</h2><div id="cars" class="cards"></div>
-      <h2>차체 색상</h2><div id="colors" class="swatches"></div>
-      <h2>휠 림 색상</h2><div id="rims" class="swatches"></div>
-      <h2>휠 크기 · 스포크</h2><div id="wsize" class="seg"></div><div id="spokes" class="seg"></div>
+    <main id="menu">
+        <header class="brand">
+            <h1>SODIUM GP</h1>
+            <p>가로등이 켜지는 시간, 도시가 서킷이 된다</p>
+        </header>
+        <div class="cols">
+            <section class="panel">
+                <h2>차량</h2>
+                <div id="cars" class="cards"></div>
+                <h2>차체 색상</h2>
+                <div id="colors" class="swatches"></div>
+                <h2>휠 림 색상</h2>
+                <div id="rims" class="swatches"></div>
+                <h2>휠 크기 · 스포크</h2>
+                <div id="wsize" class="seg"></div>
+                <div id="spokes" class="seg"></div>
+            </section>
+            <section class="panel">
+                <h2>코스</h2>
+                <div id="tracks" class="cards"></div>
+                <h2>AI 난이도</h2>
+                <div id="ai" class="seg"></div>
+            </section>
+        </div>
+        <footer class="bar">
+            <button id="start" class="go">레이스 시작</button>
+            <button id="openGuide">조작 가이드</button>
+            <button id="openSettings">설정</button>
+            <button id="fullscreen">전체 화면</button>
+        </footer>
+        <p class="credit">Ferrari 458 Italia 3D 모델: vicent091036 (CC BY) · three.js examples 제공</p>
+    </main>
+
+    <aside id="gfxTip" class="tip hidden">
+        <p id="tipText">브라우저 설정에서 <b>그래픽 가속(하드웨어 가속)</b>을 켜면 더 쾌적하게 플레이할 수 있어요. 설정 → 시스템 → “사용 가능한 경우 그래픽 가속 사용”</p>
+        <div><button id="tipOk">확인</button><button id="tipToday">오늘 하루 보지 않기</button></div>
+    </aside>
+
+    <section id="hud" class="hidden">
+        <div id="lights"><i></i><i></i><i></i><i></i><i></i></div>
+        <div id="flash"></div>
+        <div id="wrong" class="hidden">역주행!</div>
+        <div id="draft" class="hidden">슬립스트림</div>
+        <div class="rank"><b id="pos">1</b>/<span id="total">6</span><small>순위</small></div>
+        <div class="lap"><b id="lap">1/3</b><span id="time">0:00.00</span><small id="best"></small><small
+                id="gap"></small></div>
+        <canvas id="map" width="160" height="160"></canvas>
+        <div class="dash"><b id="spd">0</b><small id="unit">km/h</small><span id="gear">1</span><i><u id="rpm"></u></i>
+        </div>
+        <div id="count"></div>
+        <div id="wheel"><svg viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="44" fill="none" stroke="#eef1f7" stroke-width="8" opacity=".85" />
+                <path d="M50 50L10 64M50 50L90 64M50 50L50 92" stroke="#eef1f7" stroke-width="7" stroke-linecap="round"
+                    opacity=".85" />
+                <path d="M50 4v13" stroke="#ffb454" stroke-width="8" />
+            </svg></div>
+        <div class="pedals"><button data-k="hand">핸드</button><button data-k="brk">브레이크</button><button data-k="thr"
+                class="gas">가속</button></div>
+        <div class="side"><button data-k="cam">시점</button><button data-k="up">기어 +</button><button data-k="down">기어
+                −</button><button data-k="back">뒤보기</button><button data-k="reset">복귀</button><button
+                data-k="pause">Ⅱ</button></div>
     </section>
-    <section class="panel">
-      <h2>코스</h2><div id="tracks" class="cards"></div>
-      <h2>AI 난이도</h2><div id="ai" class="seg"></div>
-    </section>
-  </div>
-  <footer class="bar">
-    <button id="start" class="go">레이스 시작</button>
-    <button id="openGuide">조작 가이드</button>
-    <button id="openSettings">설정</button>
-    <button id="fullscreen">전체 화면</button>
-  </footer>
-  <p class="credit">Ferrari 458 Italia 3D 모델: vicent091036 (CC BY) · three.js examples 제공</p>
-</main>
 
-<aside id="gfxTip" class="tip hidden">
-  <p id="tipText">브라우저 설정에서 <b>그래픽 가속(하드웨어 가속)</b>을 켜면 더 쾌적하게 플레이할 수 있어요. 설정 → 시스템 → “사용 가능한 경우 그래픽 가속 사용”</p>
-  <div><button id="tipOk">확인</button><button id="tipToday">오늘 하루 보지 않기</button></div>
-</aside>
+    <div id="guide" class="modal hidden">
+        <div class="sheet">
+            <h2>시작 전 가이드</h2>
+            <ul>
+                <li><b>가속</b> ↑ / W · <b>브레이크·후진</b> ↓ / S · <b>핸드브레이크</b> Space</li>
+                <li><b>조향</b> ← → / A D, 또는 화면의 핸들을 마우스·손가락으로 돌리기</li>
+                <li><b>시점 전환</b> C (1인칭 ↔ 3인칭) · <b>뒤보기</b> B 꾹 누르기 · <b>수동 기어</b> E / Q · <b>복귀</b> R · <b>일시정지</b> Esc
+                </li>
+                <li>게임패드(트리거 가속·브레이크, 왼쪽 스틱 조향)도 지원합니다. 앞차 바로 뒤에서는 슬립스트림으로 가속이 붙어요.</li>
+                <li>모바일은 화면 버튼과 핸들을 동시에 누르는 멀티터치를 지원합니다.</li>
+                <li>3바퀴를 가장 먼저 완주하면 우승. 벽과 건물에 부딪히면 속도를 잃고 차가 튕겨 나갑니다.</li>
+            </ul>
+            <label class="chk"><input type="checkbox" id="skipGuide"> 다음부터 표시하지 않기</label>
+            <div class="row"><button id="guideGo" class="go">알겠어요, 출발!</button></div>
+        </div>
+    </div>
 
-<section id="hud" class="hidden">
-  <div id="lights"><i></i><i></i><i></i><i></i><i></i></div>
-  <div id="flash"></div><div id="wrong" class="hidden">역주행!</div><div id="draft" class="hidden">슬립스트림</div>
-  <div class="rank"><b id="pos">1</b>/<span id="total">6</span><small>순위</small></div>
-  <div class="lap"><b id="lap">1/3</b><span id="time">0:00.00</span><small id="best"></small><small id="gap"></small></div>
-  <canvas id="map" width="160" height="160"></canvas>
-  <div class="dash"><b id="spd">0</b><small id="unit">km/h</small><span id="gear">1</span><i><u id="rpm"></u></i></div>
-  <div id="count"></div>
-  <div id="wheel"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="none" stroke="#eef1f7" stroke-width="8" opacity=".85"/><path d="M50 50L10 64M50 50L90 64M50 50L50 92" stroke="#eef1f7" stroke-width="7" stroke-linecap="round" opacity=".85"/><path d="M50 4v13" stroke="#ffb454" stroke-width="8"/></svg></div>
-  <div class="pedals"><button data-k="hand">핸드</button><button data-k="brk">브레이크</button><button data-k="thr" class="gas">가속</button></div>
-  <div class="side"><button data-k="cam">시점</button><button data-k="up">기어 +</button><button data-k="down">기어 −</button><button data-k="back">뒤보기</button><button data-k="reset">복귀</button><button data-k="pause">Ⅱ</button></div>
-</section>
+    <div id="settings" class="modal hidden">
+        <div class="sheet">
+            <h2>설정</h2>
+            <div id="settingsBody"></div>
+            <div class="row"><button id="settingsClose" class="go">닫기</button></div>
+        </div>
+    </div>
 
-<div id="guide" class="modal hidden"><div class="sheet">
-  <h2>시작 전 가이드</h2>
-  <ul>
-    <li><b>가속</b> ↑ / W · <b>브레이크·후진</b> ↓ / S · <b>핸드브레이크</b> Space</li>
-    <li><b>조향</b> ← → / A D, 또는 화면의 핸들을 마우스·손가락으로 돌리기</li>
-    <li><b>시점 전환</b> C (1인칭 ↔ 3인칭) · <b>뒤보기</b> B 꾹 누르기 · <b>수동 기어</b> E / Q · <b>복귀</b> R · <b>일시정지</b> Esc</li>
-    <li>게임패드(트리거 가속·브레이크, 왼쪽 스틱 조향)도 지원합니다. 앞차 바로 뒤에서는 슬립스트림으로 가속이 붙어요.</li>
-    <li>모바일은 화면 버튼과 핸들을 동시에 누르는 멀티터치를 지원합니다.</li>
-    <li>3바퀴를 가장 먼저 완주하면 우승. 벽과 건물에 부딪히면 속도를 잃고 차가 튕겨 나갑니다.</li>
-  </ul>
-  <label class="chk"><input type="checkbox" id="skipGuide"> 다음부터 표시하지 않기</label>
-  <div class="row"><button id="guideGo" class="go">알겠어요, 출발!</button></div>
-</div></div>
+    <div id="pause" class="modal hidden">
+        <div class="sheet">
+            <h2>일시정지</h2>
+            <div class="row col"><button id="resume" class="go">계속하기</button><button
+                    id="pauseSettings">설정</button><button id="restart">다시 시작</button><button id="quit">메인 화면으로</button>
+            </div>
+        </div>
+    </div>
 
-<div id="settings" class="modal hidden"><div class="sheet">
-  <h2>설정</h2><div id="settingsBody"></div>
-  <div class="row"><button id="settingsClose" class="go">닫기</button></div>
-</div></div>
+    <div id="result" class="modal hidden">
+        <div class="sheet">
+            <h2>레이스 결과</h2>
+            <ol id="resultBody"></ol>
+            <div class="row"><button id="again" class="go">다시 달리기</button><button id="toMenu">메인 화면으로</button></div>
+        </div>
+    </div>
 
-<div id="pause" class="modal hidden"><div class="sheet">
-  <h2>일시정지</h2>
-  <div class="row col"><button id="resume" class="go">계속하기</button><button id="pauseSettings">설정</button><button id="restart">다시 시작</button><button id="quit">메인 화면으로</button></div>
-</div></div>
-
-<div id="result" class="modal hidden"><div class="sheet">
-  <h2>레이스 결과</h2><ol id="resultBody"></ol>
-  <div class="row"><button id="again" class="go">다시 달리기</button><button id="toMenu">메인 화면으로</button></div>
-</div></div>
-
-<script src="dist/game.js"></script>
+    <script src="dist/game.js"></script>
 </body>
+
 </html>

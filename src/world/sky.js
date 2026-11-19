@@ -15,17 +15,17 @@ void main(){
 }`;
 
 export function makeSky() {
-  const u = { top: { value: new THREE.Color() }, mid: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, sunC: { value: new THREE.Color() }, sun: { value: new THREE.Vector3() }, stars: { value: 0 } };
-  const mat = new THREE.ShaderMaterial({ uniforms: u, vertexShader: vs, fragmentShader: fs, side: THREE.BackSide, depthWrite: false, fog: false });
-  const geo = new THREE.SphereGeometry(1000, 32, 16);
-  const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false;
-  return {
-    mesh, clone: () => new THREE.Mesh(geo, mat),
-    set(id) {
-      const t = TIMES[id];
-      u.top.value.set(t.top); u.mid.value.set(t.mid); u.hor.value.set(t.hor); u.sunC.value.set(t.sun);
-      u.sun.value.set(...t.dir).normalize(); u.stars.value = t.stars;
-      return t;
-    },
-  };
+    const u = { top: { value: new THREE.Color() }, mid: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, sunC: { value: new THREE.Color() }, sun: { value: new THREE.Vector3() }, stars: { value: 0 } };
+    const mat = new THREE.ShaderMaterial({ uniforms: u, vertexShader: vs, fragmentShader: fs, side: THREE.BackSide, depthWrite: false, fog: false });
+    const geo = new THREE.SphereGeometry(1000, 32, 16);
+    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false;
+    return {
+        mesh, clone: () => new THREE.Mesh(geo, mat),
+        set(id) {
+            const t = TIMES[id];
+            u.top.value.set(t.top); u.mid.value.set(t.mid); u.hor.value.set(t.hor); u.sunC.value.set(t.sun);
+            u.sun.value.set(...t.dir).normalize(); u.stars.value = t.stars;
+            return t;
+        },
+    };
 }
