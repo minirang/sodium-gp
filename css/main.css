@@ -615,3 +615,8 @@ body.touch .dash {
     color: var(--text);
     margin-top: 2px
 }
+.sheet .sub {
+    margin: -6px 0 12px;
+    color: var(--dim, #9aa3b5);
+    font-size: 14px;
+}

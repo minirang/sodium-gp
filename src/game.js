@@ -127,10 +127,10 @@ export class Game {
         show('#menu', false); show('#gfxTip', false); this.hud.show(true);
         this.clearPreview();
         const w = this.world = new C.World({ gravity: new C.Vec3(0, -9.82, 0) });
-        w.defaultContactMaterial.friction = 0.15; w.defaultContactMaterial.restitution = 0.1;
+        w.defaultContactMaterial.friction = 0.08; w.defaultContactMaterial.restitution = 0.12; // 차끼리 비벼도 서로 들어 올리지 않게 낮은 마찰
         this.track.addPhysics(w);
 
-        const L = store.look, ps = CARS.find((c) => c.id === L.car), lv = AI_LEVELS[store.ai].skill, rnd = Math.random;
+        const L = store.look, ps = CARS.find((c) => c.id === L.car), lv = this.level = AI_LEVELS[store.ai], rnd = Math.random;
         const personas = [...PERSONAS].sort(() => rnd() - 0.5), colors = COLORS.filter((c) => c !== L.color);
         let a = 0, ferrari = 0;
         this.cars = [0, 1, 2, 3, 4, 5].map((k) => {
@@ -148,7 +148,7 @@ export class Game {
                 if (this.q.shadow < 2048) { car.mesh.traverse((o) => { o.castShadow = false; }); car.wheels.forEach((x) => x.traverse((o) => { o.castShadow = false; })); }
             }
             this.initIdx(car);
-            car.ai = new AI(car, this.track.S, k === 3 ? 0.7 : lv * (0.97 + rnd() * 0.06), persona, rnd() * 6);
+            car.ai = new AI(car, this.track.S, k === 3 ? AI_LEVELS[1] : lv, persona, rnd() * 6, this.track.limit);
             car.startAt = k === 3 ? 0 : car.ai.react;
             car.hit = (v) => { if (car === this.player) { this.sound.hit(v); this.shake = Math.min(1, v / 18); } };
             return car;
@@ -156,7 +156,7 @@ export class Game {
         this.player.onShift = (up, thr) => this.sound.shift(up, thr);
         this.player.lights.forEach((l) => { l.intensity = this.tm.head; });
         // 5개 신호등이 1초 간격으로 켜진 뒤, 무작위 시간(0.4~1.4초) 후 꺼지면 출발
-        Object.assign(this, { mode: 'count', cdT: 0, goAt: 5 + 0.4 + rnd(), time: 0, lit: -1, paused: false, acc: 0, camMode: store.settings.cam, order: this.cars });
+        Object.assign(this, { stuckT: 0, mode: 'count', cdT: 0, goAt: 5 + 0.4 + rnd(), time: 0, lit: -1, paused: false, acc: 0, camMode: store.settings.cam, order: this.cars });
         this.cam.fov = this.fovCur = store.settings.fov; this.cam.near = this.camMode === 'cockpit' ? 0.05 : 0.2; this.cam.updateProjectionMatrix();
         this.chase.init = false; this.input.reset(); this.hud.clear();
     }
@@ -193,9 +193,19 @@ export class Game {
         if (v) { this.sound.stop(); this.sound.c?.suspend(); } else this.sound.c?.resume();
     }
 
+    // 복귀: 다른 차와 겹치지 않는 자리(좌우)를 골라 내려놓고, 잠시 다른 차와 충돌하지 않게 한다
     respawn(c) {
-        const s = this.track.S[c.idx]; c.place({ pos: s.p, yaw: s.yaw });
-        if (c === this.player) this.chase.init = false;
+        const S = this.track.S, s = S[c.idx];
+        let best = 0, bd = -1;
+        for (const o of [0, -4.5, 4.5, -2.5, 2.5, -6, 6]) {
+            const x = s.p.x + s.n.x * o, z = s.p.z + s.n.z * o;
+            let d = 1e9; for (const q of this.cars) if (q !== c) d = Math.min(d, Math.hypot(q.body.position.x - x, q.body.position.z - z));
+            if (d > bd + 0.5) { bd = d; best = o; }
+            if (d > 9) break;
+        }
+        c.place({ pos: s.p.clone().addScaledVector(s.n, best), yaw: s.yaw }); c.ghost = 2.5;
+        if (c.ai) { c.ai.stuck = 0; c.ai.rec = null; c.ai.slow = 0; }
+        if (c === this.player) { this.chase.init = false; this.stuckT = 0; }
     }
 
     trackProgress(c) {
@@ -226,7 +236,7 @@ export class Game {
 
     results() {
         if (this.mode !== 'done') return;
-        showResult(this.order.map((c) => ({ name: c.name, tag: c.tag, me: c === this.player, time: c.finished ? c.finishT : null, best: c.laps.length ? Math.min(...c.laps) : null })));
+        showResult(this.order.map((c) => ({ name: c.name, tag: c.tag, me: c === this.player, time: c.finished ? c.finishT : null, best: c.laps.length ? Math.min(...c.laps) : null, lap: Math.min(Math.max(c.lap, 1), LAPS) })), this.level.name);
     }
 
     frame() {
@@ -275,6 +285,17 @@ export class Game {
             }
         }
 
+        // 뒤처진 AI는 난이도에 따라 살짝 힘을 내고(쉬움은 너무 앞선 경우 조금 늦춤), 프로는 보정 없음
+        const rb = this.level.rb;
+        for (const c of this.cars) if (c !== pl) {
+            const gap = (pl.prog - c.prog) * S.step;
+            c.ai.boost = 1 + rb * (Math.min(0.04, Math.max(0, gap - 60) / 900) - Math.min(0.035, Math.max(0, -gap - 150) / 900));
+        }
+        if (this.mode === 'race' && !pl.finished) {
+            this.stuckT = pl.kmh < 4 && (pi.thr > 0.4 || pi.brk > 0.4) && !pl.righting ? this.stuckT + STEP : 0;
+            if (this.stuckT > 3) { this.stuckT = -6; this.hud.flash('막혔다면 R 키(모바일: 복귀)로 코스에 복귀하세요', false); }
+        }
+
         for (const c of this.cars) {
             let i = IDLE;
             if (c === pl) {
@@ -282,9 +303,10 @@ export class Game {
                 else { Object.assign(this.pin, pi, { auto: st.shift === 'auto', up: this.upP, down: this.downP, assist: st.assist }); this.upP = this.downP = 0; i = this.pin; }
             } else if (this.mode !== 'count' && !c.hold) i = c.ai.drive(STEP, this.cars);
             if (this.mode !== 'count' && c.hold && this.time >= c.startAt) c.hold = false;
+            const wasR = c.righting;
             c.update(STEP, i);
-            if (c !== pl && c.ai.stuck > 3) { this.respawn(c); c.ai.stuck = 0; }
-            if (c.flipT > 2) { this.respawn(c); c.flipT = 0; }
+            if (c === pl && !wasR && c.righting) this.hud.flash('차량을 바로 세우는 중…', false);
+            if (c !== pl && c.ai.stuck > 4.5) this.respawn(c);
         }
         for (const c of this.cars) c.snap();
         this.world.step(STEP);
@@ -342,10 +364,10 @@ export class Game {
         this.fovCur += (tf - this.fovCur) * (1 - Math.exp(-dt * 1.5));
         if (Math.abs(cam.fov - this.fovCur) > 0.03) { cam.fov = this.fovCur; cam.updateProjectionMatrix(); }
 
-        const ch = this.chase, carYaw = Math.atan2(-c.fwd.z, c.fwd.x), vel = c.body.velocity;
+        const ch = this.chase, carYaw = c.yaw, vel = c.body.velocity, far = clamp(c.kmh / 260, 0, 1);
         if (this.camMode === 'cockpit') {
             // 피치/롤은 일부만 반영해 어지럽지 않게 한다
-            Q.setFromEuler(EU.set(0, carYaw, 0)); Q2.copy(Q).slerp(c.mesh.quaternion, 0.4);
+            Q.setFromEuler(EU.set(0, carYaw, 0)); Q2.copy(Q).slerp(c.mesh.quaternion, c.righting ? 0 : 0.4);
             cam.position.copy(f).add(V.copy(c.model.eye).applyQuaternion(Q2));
             cam.quaternion.copy(Q2).multiply(Y90).multiply(Q.setFromEuler(EU.set(0, -c.steerIn * 0.1 + (back ? Math.PI : 0), 0)));
             ch.init = true;
@@ -354,12 +376,14 @@ export class Game {
             let ty = carYaw;
             if (Math.hypot(vel.x, vel.z) > 6) ty += wrap(Math.atan2(-vel.z, vel.x) - carYaw) * 0.45;
             if (back) ty += Math.PI;
-            if (!ch.init || back !== this.lastBack) { ch.yaw = ty; ch.init = true; V.set(Math.cos(ty), 0, -Math.sin(ty)); cam.position.copy(f).addScaledVector(V, -6.4).setY(f.y + 2.2); }
-            ch.yaw += wrap(ty - ch.yaw) * (1 - Math.exp(-dt * 6));
+            if (!ch.init || back !== this.lastBack) { ch.yaw = ty; ch.init = true; V.set(Math.cos(ty), 0, -Math.sin(ty)); cam.position.copy(f).addScaledVector(V, -6.4).setY(f.y + 2.1); }
+            // 차가 뒤집히거나 바로 세워지는 동안은 카메라가 휘둘리지 않도록 천천히 따라간다
+            ch.yaw += wrap(ty - ch.yaw) * (1 - Math.exp(-dt * (c.righting || c.contacts < 2 ? 1.5 : 6)));
             V.set(Math.cos(ch.yaw), 0, -Math.sin(ch.yaw));
-            V2.copy(f).addScaledVector(V, -6.4); V2.y += 2.0;
-            cam.position.lerp(V2, 1 - Math.exp(-dt * 20)); cam.position.y = Math.max(cam.position.y, 0.8);
-            cam.lookAt(V2.copy(f).addScaledVector(V, 6).setY(f.y + 1));
+            const dist = 6.3 + far * 0.9, fy = Math.min(f.y, 1.4);
+            V2.copy(f).addScaledVector(V, -dist); V2.y = fy + 1.45 + far * 0.25;
+            cam.position.lerp(V2, 1 - Math.exp(-dt * 14)); cam.position.y = Math.max(cam.position.y, 0.8);
+            cam.lookAt(V2.copy(f).addScaledVector(V, 6 + far * 3).setY(fy + 0.45));
         }
         this.lastBack = back;
         // 충돌 흔들림: 감쇠하는 사인파 (매 프레임 무작위 떨림 없음)

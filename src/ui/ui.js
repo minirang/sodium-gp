@@ -1,17 +1,20 @@
 import { store, save } from '../store.js';
-import { CARS, TRACKS, AI_LEVELS, COLORS, RIM_COLORS, WHEEL_SIZES, SPOKES, SCHEMA } from '../config.js';
+import { CARS, TRACKS, AI_LEVELS, COLORS, RIM_COLORS, WHEEL_SIZES, SPOKES, SCHEMA, LAPS } from '../config.js';
 import { fmt } from './hud.js';
 
 const $ = (s) => document.querySelector(s);
 export const show = (s, v = true) => $(s).classList.toggle('hidden', !v);
 const btn = (cls, html, fn) => { const b = document.createElement('button'); b.className = cls; b.innerHTML = html; b.onclick = fn; return b; };
 
-export function showResult(rows) {
-    const win = rows.find((r) => r.time != null)?.time;
+export function showResult(rows, level = '') {
+    const win = rows.find((r) => r.time != null)?.time, me = rows.findIndex((r) => r.me), mine = rows[me];
+    const medal = ['🏆 우승!', '🥈 2위 완주', '🥉 3위 완주'][me] || `${me + 1}위 완주`;
+    $('#resultTitle').textContent = me >= 0 ? medal : '레이스 결과';
+    $('#resultSub').textContent = [level && `AI 난이도 ${level}`, mine?.best && `내 베스트 랩 ${fmt(mine.best)}`].filter(Boolean).join(' · ');
     $('#resultBody').replaceChildren(...rows.map((r) => {
         const li = document.createElement('li');
         li.className = r.me ? 'me' : '';
-        li.textContent = `${r.name}${r.tag ? ` (${r.tag})` : ''} — ${r.time != null ? fmt(r.time) + (r.time !== win ? ` (+${(r.time - win).toFixed(2)})` : '') : '주행 중'}${r.best ? ` · 베스트 ${fmt(r.best)}` : ''}`;
+        li.textContent = `${r.name}${r.tag ? ` (${r.tag})` : ''} — ${r.time != null ? fmt(r.time) + (r.time !== win ? ` (+${(r.time - win).toFixed(2)})` : '') : `주행 중 · ${r.lap}/${LAPS}랩`}${r.best ? ` · 베스트 ${fmt(r.best)}` : ''}`;
         return li;
     }));
     show('#result');

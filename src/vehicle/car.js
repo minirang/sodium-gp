@@ -4,96 +4,171 @@ import { buildCar } from './model.js';
 import { makeBlob } from '../systems/fx.js';
 
 const RATIO = [3.6, 2.6, 1.95, 1.55, 1.28, 1.05];
+const WB = 2.65; // 휠베이스(m)
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const smooth = (t) => t * t * (3 - 2 * t);
 const FWD = new C.Vec3(1, 0, 0), UP = new C.Vec3(0, 1, 0), RIGHT = new C.Vec3(0, 0, 1);
-const E = new THREE.Euler();
+const E = new THREE.Euler(), TQ = new C.Vec3(), QA = new THREE.Quaternion(), QB = new THREE.Quaternion();
+export const G_WORLD = 1, G_CAR = 2;
+
+// 토크 곡선: 저회전에서 약하고 피크(0.85) 이후 레드라인까지 떨어진다
+const torque = (r) => (r < 0.85 ? 0.68 + 0.32 * (r / 0.85) : r < 1 ? 1 - ((r - 0.85) / 0.15) * 0.35 : 0);
 
 export class Car {
     constructor(world, scene, spec, look, pose, opts = {}) {
-        Object.assign(this, { world, scene, spec, look, gear: 1, shiftT: 0, rpm: 1000, kmh: 0, fs: 0, idx: 0, lap: 0, maxLap: 0, prog: 0, laps: [], lapT: 0, finished: false, hold: true, startAt: 0, hit: null, flipT: 0, reverse: false, braking: false, slide: 0, scrape: 0, draft: 0, steerIn: 0, onShift: null });
-        this.fw = new C.Vec3(); this.rt = new C.Vec3(); this.upv = new C.Vec3(); this.aero = new C.Vec3();
+        Object.assign(this, { world, scene, spec, look, gear: 1, shiftT: 0, rpm: 1000, kmh: 0, fs: 0, idx: 0, lap: 0, maxLap: 0, prog: 0, laps: [], lapT: 0, finished: false, hold: true, startAt: 0, hit: null, flipT: 0, reverse: false, braking: false, slide: 0, scrape: 0, draft: 0, steerIn: 0, onShift: null, delta: 0, ghost: 0, righting: null, contacts: 4, yaw: pose.yaw });
+        this.fw = new C.Vec3(); this.rt = new C.Vec3(); this.upv = new C.Vec3(); this.upv2 = new C.Vec3(); this.aero = new C.Vec3(); this.fwd = { x: 1, z: 0 };
         const m = this.model = buildCar(look, opts);
         this.mesh = m.group; this.wheels = m.wheels; this.lights = m.lights;
         this.blob = makeBlob(spec);
         scene.add(m.group, ...m.wheels, this.blob);
 
-        // 렌더 보간용 이전/현재 상태 (물리는 고정 스텝, 화면은 프레임마다 보간)
+        // 엔진·공력: 출력(W)과 최고속도에서 공기저항 계수를 역산해 차량 사양대로 달린다
+        this.P = spec.mass * 172 * spec.power;
+        this.drag = this.P / spec.top ** 3;
+        this.down = spec.mass * 0.0011;
+        this.tcap = spec.mass * spec.grip * 3.4; // 출발 시 구동력 한계
+        this.I = spec.mass * 0.55;
+
+        // 렌더 보간용 이전/현재 상태
         this.pp = new THREE.Vector3(); this.cp = new THREE.Vector3(); this.pq = new THREE.Quaternion(); this.cq = new THREE.Quaternion();
         this.wp = [0, 1, 2, 3].map(() => new THREE.Vector3()); this.wc = [0, 1, 2, 3].map(() => new THREE.Vector3()); this.wq = [0, 1, 2, 3].map(() => new THREE.Quaternion());
 
-        const body = this.body = new C.Body({ mass: spec.mass, linearDamping: 0.02, angularDamping: 0.5 });
-        body.addShape(new C.Box(new C.Vec3(spec.hx, 0.35, spec.hz)), new C.Vec3(spec.ox, 0, 0));
+        const body = this.body = new C.Body({ mass: spec.mass, linearDamping: 0.004, angularDamping: 0.3, collisionFilterGroup: G_CAR, collisionFilterMask: G_CAR | G_WORLD });
+        // 충돌 박스를 조금 위로 올려 무게중심이 상대적으로 낮아지게 한다
+        body.addShape(new C.Box(new C.Vec3(spec.hx, 0.33, spec.hz)), new C.Vec3(spec.ox, 0.12, 0));
         body.addEventListener('collide', (e) => { const v = Math.abs(e.contact.getImpactVelocityAlongNormal()); if (v > 2.5) this.hit?.(v); });
         const v = this.vehicle = new C.RaycastVehicle({ chassisBody: body, indexRightAxis: 2, indexForwardAxis: 0, indexUpAxis: 1 });
-        const r = look.wheel, o = { radius: r, directionLocal: new C.Vec3(0, -1, 0), axleLocal: new C.Vec3(0, 0, 1), suspensionStiffness: 42, suspensionRestLength: 0.15, maxSuspensionTravel: 0.25, maxSuspensionForce: 2e5, dampingRelaxation: 3.4, dampingCompression: 5.6, rollInfluence: 0.02, customSlidingRotationalSpeed: -30, useCustomSlidingRotationalSpeed: true };
-        this.gripF = spec.grip * 1.08; this.gripR = spec.grip * 0.96;
+        const r = look.wheel, o = { radius: r, directionLocal: new C.Vec3(0, -1, 0), axleLocal: new C.Vec3(0, 0, 1), suspensionStiffness: 40, suspensionRestLength: 0.15, maxSuspensionTravel: 0.22, maxSuspensionForce: 2e5, dampingRelaxation: 3.2, dampingCompression: 4.8, rollInfluence: 0.03, customSlidingRotationalSpeed: -30, useCustomSlidingRotationalSpeed: true };
+        this.gripF = spec.grip * 0.57; this.gripR = spec.grip * 0.55;
         m.wheelPts.forEach((p, i) => v.addWheel({ ...o, frictionSlip: i < 2 ? this.gripF : this.gripR, chassisConnectionPointLocal: new C.Vec3(p.x, r - 0.46, p.z) }));
         v.addToWorld(world);
-        // 서브스텝마다 공기저항·다운포스를 주고, 충돌로 인한 과도한 회전을 제한한다
-        this._aero = () => {
-            const fw = body.vectorToWorldFrame(FWD, this.fw), s = body.velocity.dot(fw), f = -0.4 * s * Math.abs(s), w = body.angularVelocity;
-            body.applyForce(this.aero.set(fw.x * f, -0.3 * s * s, fw.z * f));
-            w.x = clamp(w.x, -2.5, 2.5); w.y = clamp(w.y, -3.2, 3.2); w.z = clamp(w.z, -2.5, 2.5);
+
+        // 물리 스텝마다: 공기저항·다운포스, 자세 안정화(롤/피치 복원), 비정상적인 튕김 제한
+        this._pre = () => {
+            const b = body, fw = b.vectorToWorldFrame(FWD, this.fw), s = b.velocity.dot(fw), w = b.angularVelocity;
+            const fd = -this.drag * s * Math.abs(s);
+            b.applyForce(this.aero.set(fw.x * fd, -this.down * s * s, fw.z * fd));
+            let n = 0; for (const wi of v.wheelInfos) if (wi.isInContact) n++;
+            this.contacts = n;
+            if (this.righting) return;
+            const up = b.vectorToWorldFrame(UP, this.upv2), air = n < 2;
+            let ax = -up.z, az = up.x, sn = Math.hypot(ax, az);
+            if (sn < 1e-3) { ax = fw.x; az = fw.z; sn = Math.hypot(ax, az) || 1; }
+            ax /= sn; az /= sn;
+            const ang = Math.acos(clamp(up.y, -1, 1)), om = air ? 5 : 3.2, ex = Math.max(0, ang - (air ? 0.02 : 0.12)), k = this.I * om * om;
+            const mag = Math.min(k * ex, k * (air ? 1.2 : 0.5)), zeta = air ? 0.9 : ex > 0 ? 0.6 : 0.12, dmp = this.I * 2 * zeta * om;
+            b.torque.x += ax * mag - w.x * dmp; b.torque.z += az * mag - w.z * dmp;
+            w.x = clamp(w.x, -2, 2); w.y = clamp(w.y, -3, 3); w.z = clamp(w.z, -2, 2);
+            if (b.velocity.y > 3.5) b.velocity.y = 3.5;
         };
-        world.addEventListener('preStep', this._aero);
+        world.addEventListener('preStep', this._pre);
         this.place(pose);
     }
+
+    vmax(g) { return (this.spec.top * RATIO[5]) / RATIO[g - 1]; }
+    // 속도에 따른 최대 조향각: 고속에서 과도한 조향을 막되 한계 주행은 가능하게
+    maxSteer(a) { return Math.min(0.5, (WB * 13) / Math.max(a * a, 1) + 0.03); }
 
     place({ pos, yaw }) {
         const b = this.body;
         b.position.set(pos.x, 0.9, pos.z); b.quaternion.setFromEuler(0, yaw, 0);
         b.velocity.setZero(); b.angularVelocity.setZero();
-        this.fwd = { x: Math.cos(yaw), z: -Math.sin(yaw) }; this.gear = 1;
+        this.fwd.x = Math.cos(yaw); this.fwd.z = -Math.sin(yaw); this.yaw = yaw;
+        Object.assign(this, { gear: 1, delta: 0, righting: null, flipT: 0, shiftT: 0 });
+        for (let i = 0; i < 4; i++) this.vehicle.setSteeringValue(0, i);
         this.capture(); this.snap(); this.render(1, false);
+    }
+
+    // 뒤집히거나 옆으로 누운 채 멈추면 순간이동 대신 부드럽게 들어 올려 바로 세운다
+    startRight() {
+        const b = this.body;
+        QA.set(b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w);
+        QB.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+        this.righting = { t: 0, q0: QA.clone(), q1: QB.clone(), y0: b.position.y };
+        this.ghost = Math.max(this.ghost, 1.6);
+    }
+
+    stepRight(dt) {
+        const r = this.righting, b = this.body, D = 0.85;
+        r.t += dt; const k = smooth(clamp(r.t / D, 0, 1));
+        QA.copy(r.q0).slerp(r.q1, k);
+        b.quaternion.set(QA.x, QA.y, QA.z, QA.w);
+        b.position.y = r.y0 + (0.85 - r.y0) * k + Math.sin(Math.PI * k) * 0.6;
+        b.velocity.x *= 0.9; b.velocity.z *= 0.9; b.velocity.y = 0; b.angularVelocity.setZero();
+        if (r.t >= D) { this.righting = null; this.flipT = 0; }
     }
 
     update(dt, inp) {
         const { body: b, spec: sp, vehicle: v } = this;
+        this.ghost = Math.max(0, this.ghost - dt);
+        const mask = this.ghost > 0 ? G_WORLD : G_WORLD | G_CAR;
+        if (b.collisionFilterMask !== mask) b.collisionFilterMask = mask;
+
         const fw = b.vectorToWorldFrame(FWD, this.fw), fs = this.fs = b.velocity.dot(fw), a = Math.abs(fs), vlat = b.velocity.dot(b.vectorToWorldFrame(RIGHT, this.rt));
-        this.fwd.x = fw.x; this.fwd.z = fw.z; this.kmh = a * 3.6; this.shiftT = Math.max(0, this.shiftT - dt);
-        this.slide = this.kmh > 15 ? clamp(Math.abs(vlat) / 5 + (inp.hand ? 0.5 : 0), 0, 1) : 0;
-        const vmax = (g) => sp.top * RATIO[5] / RATIO[g - 1], r = clamp(a / vmax(this.gear), 0, 1.05);
-        this.rpm = 1000 + 6500 * clamp(Math.max(r, inp.thr * 0.2), 0, 1.05);
+        const hl = Math.hypot(fw.x, fw.z);
+        if (hl > 0.25) { this.fwd.x = fw.x / hl; this.fwd.z = fw.z / hl; this.yaw = Math.atan2(-this.fwd.z, this.fwd.x); }
+        const speed = Math.hypot(b.velocity.x, b.velocity.z);
+        this.kmh = speed * 3.6; this.shiftT = Math.max(0, this.shiftT - dt);
+        this.slide = this.kmh > 15 ? clamp(Math.abs(vlat) / 4 + (inp.hand ? 0.4 : 0), 0, 1) : 0;
+
+        const up = b.vectorToWorldFrame(UP, this.upv);
+        if (this.righting) this.stepRight(dt);
+        else {
+            this.flipT = up.y < 0.45 && speed < 6 ? this.flipT + dt : 0;
+            if (this.flipT > 0.8) this.startRight();
+        }
+
+        const r = clamp(a / this.vmax(this.gear), 0, 1.05), rearSlip = v.wheelInfos[2].sliding || v.wheelInfos[3].sliding;
+        this.rpm = 1000 + 6500 * clamp(Math.max(r, inp.thr * 0.18) + (rearSlip && inp.thr > 0.5 ? 0.12 : 0), 0, 1.03);
 
         let F = 0, brk = 0; this.reverse = false;
-        if (this.hold) { brk = 1.5; this.rpm = 1000 + 5500 * clamp(inp.thr, 0, 1); }
+        const coast = !(inp.thr > 0.02) && !(inp.brk > 0.02);
+        if (this.hold) { brk = 1; this.rpm = 1000 + 5500 * clamp(inp.thr, 0, 1); }
         else if (inp.thr > 0.02) {
             if (fs < -1.5) brk = inp.thr;
-            else if (!this.shiftT) F = sp.mass * 6.5 * sp.power * (RATIO[this.gear - 1] / RATIO[0]) * (r < 0.88 ? 0.8 + 0.2 * r / 0.88 : Math.max(0, (1 - r) / 0.12)) * inp.thr;
+            else if (!this.shiftT) F = Math.min(this.tcap, (this.P / (this.vmax(this.gear) * 0.85)) * torque(r)) * inp.thr;
         } else if (inp.brk > 0.02) {
             if (fs > 1.5) brk = inp.brk;
-            else { this.reverse = true; F = a < 14 ? -sp.mass * 3.2 * inp.brk : 0; }
+            else { this.reverse = true; F = fs > -11 ? -sp.mass * 3.4 * inp.brk : 0; }
         }
-        if (F > 0) { F *= 1 + this.draft * 0.1; if (inp.assist > 1 && this.slide > 0.45) F *= 0.55; }
+        if (F > 0) {
+            F *= 1 + this.draft * 0.12;
+            if (inp.assist > 1 && (rearSlip || this.slide > 0.5)) F *= 0.6; // 구동력 제어
+        }
 
         const was = this.gear;
         if (inp.auto) {
-            if (r > 0.93 && this.gear < 6 && !this.shiftT) { this.gear++; this.shiftT = 0.2; }
-            else if (this.gear > 1 && a < vmax(this.gear - 1) * 0.7) this.gear--;
+            if (r > 0.95 && this.gear < 6 && !this.shiftT) { this.gear++; this.shiftT = 0.15; }
+            else if (this.gear > 1 && a < this.vmax(this.gear - 1) * 0.72) this.gear--;
         } else {
-            if (inp.up && this.gear < 6) { this.gear++; this.shiftT = 0.2; }
-            if (inp.down && this.gear > 1) this.gear--;
+            if (inp.up && this.gear < 6) { this.gear++; this.shiftT = 0.15; }
+            if (inp.down && this.gear > 1 && a < this.vmax(this.gear - 1) * 0.98) this.gear--;
         }
         if (this.gear !== was) this.onShift?.(this.gear > was, inp.thr);
 
-        const bf = brk * sp.mass * 2.6;
-        this.braking = brk > 0 || inp.hand > 0;
-        for (const i of [0, 1]) { v.setBrake(bf * 1.1, i); v.applyEngineForce(0, i); }
+        // 브레이크는 '감속도'로 준다: 바퀴가 잠기지 않아 제동 중에도 조향이 살아 있다 (ABS 느낌)
+        const bi = brk * sp.mass * 13.5 * dt, eb = coast && !this.hold ? sp.mass * (0.7 + a * 0.015) * dt * 0.5 : 0;
+        this.braking = brk > 0.05 || inp.hand > 0;
+        for (const i of [0, 1]) { v.setBrake(bi * 0.31, i); v.applyEngineForce(0, i); }
         for (const i of [2, 3]) {
-            v.setBrake(bf * 0.9 + (inp.hand ? sp.mass * 4 : 0), i); v.applyEngineForce(F / 2, i);
-            v.wheelInfos[i].frictionSlip = this.gripR * (inp.hand ? 0.55 : 1);
+            v.setBrake(F ? 0 : bi * 0.19 + eb + (inp.hand ? sp.mass * 1.5 : 0), i); v.applyEngineForce(F / 2, i);
+            v.wheelInfos[i].frictionSlip = this.gripR * (inp.hand ? 0.6 : 1);
         }
 
-        // 속도가 오를수록 최대 조향각을 줄인다. 입력이 유지되는 동안 조향각도 유지된다.
-        let delta = -inp.steer * Math.max(0.03, 0.42 / (1 + (a / 10) ** 2));
+        let target = -inp.steer * this.maxSteer(a);
+        const w = b.angularVelocity;
         if (inp.assist > 0 && a > 8) {
-            // 차가 명령한 것보다 더 크게 회전(오버스티어)할 때만 카운터 스티어를 건다
-            const over = b.angularVelocity.y - (fs * Math.tan(delta)) / 2.65;
-            if (Math.abs(over) > 0.4 && over * b.angularVelocity.y > 0) delta -= clamp(over * 0.12, -0.12, 0.12);
+            // 차가 명령보다 크게 회전(오버스티어)할 때 카운터 스티어 + 요 안정화
+            const cmd = (fs * Math.tan(this.delta)) / WB, over = w.y - cmd;
+            if (Math.abs(over) > 0.35 && over * w.y > 0) {
+                target -= clamp(over * 0.12, -0.12, 0.12);
+                b.torque.y -= (over - Math.sign(over) * 0.35) * sp.mass * 1.8 * (inp.assist > 1 ? 4 : 2.5);
+            }
         }
-        v.setSteeringValue(delta, 0); v.setSteeringValue(delta, 1);
+        this.delta += clamp(target - this.delta, -3.2 * dt, 3.2 * dt);
+        v.setSteeringValue(this.delta, 0); v.setSteeringValue(this.delta, 1);
         this.steerIn = inp.rawSteer ?? inp.steer;
-        this.flipT = b.vectorToWorldFrame(UP, this.upv).y < 0.25 ? this.flipT + dt : 0;
     }
 
     snap() {
@@ -125,7 +200,7 @@ export class Car {
 
     dispose() {
         this.vehicle.removeFromWorld(this.world);
-        this.world.removeEventListener('preStep', this._aero);
+        this.world.removeEventListener('preStep', this._pre);
         this.scene.remove(this.mesh, ...this.wheels, this.blob);
         this.model.dispose();
     }

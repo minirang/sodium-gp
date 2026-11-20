@@ -12,7 +12,13 @@ export const COLORS = ['#d1142a', '#2fb6e8', '#f2b632', '#eef1f7', '#1d1f26', '#
 export const RIM_COLORS = ['#d9dde6', '#ffb454', '#14161c', '#e5483a', '#3fd0c9'];
 export const WHEEL_SIZES = [0.33, 0.36, 0.39];
 export const SPOKES = [5, 6, 10];
-export const AI_LEVELS = [{ name: '쉬움', skill: 0.72 }, { name: '보통', skill: 0.86 }, { name: '어려움', skill: 0.98 }];
+// corner/brake: 코너·제동 한계 대비 비율, pace: 목표 속도 배율, err: 실수 빈도·크기, rb: 뒤처진 AI 따라잡기 정도
+export const AI_LEVELS = [
+    { name: '쉬움', corner: 0.8, brake: 0.78, pace: 0.9, err: 2.2, rb: 1 },
+    { name: '보통', corner: 0.89, brake: 0.88, pace: 0.96, err: 1.2, rb: 0.7 },
+    { name: '어려움', corner: 0.96, brake: 0.96, pace: 1.0, err: 0.5, rb: 0.3 },
+    { name: '프로', corner: 1.0, brake: 1.0, pace: 1.02, err: 0.15, rb: 0 },
+];
 export const QUALITY = [
     { pr: 0.75, shadow: 0, fog: 300, bloom: 0, msaa: 0, trees: 0.35 },
     { pr: 1, shadow: 1024, fog: 450, bloom: 0, msaa: 0, trees: 0.6 },
@@ -26,15 +32,15 @@ export const TIMES = {
 };
 export const TRACKS = [
     {
-        id: 'downtown', name: '다운타운 서킷', desc: '빌딩 숲을 가르는 빠른 시가지 코스', seed: 7, scale: 1.3, buildings: 170, trees: 260,
+        id: 'downtown', name: '다운타운 서킷', desc: '초고층 빌딩·네온사인·전광판 사이를 가르는 빠른 시가지 코스', theme: 'city', seed: 7, scale: 1.3, buildings: 170, trees: 260,
         pts: [[0, -200], [150, -180], [250, -60], [200, 80], [80, 150], [-60, 100], [-150, 170], [-260, 60], [-220, -90], [-100, -160]]
     },
     {
-        id: 'riverside', name: '리버사이드 스프린트', desc: '넓은 곡선이 이어지는 강변 코스', seed: 21, scale: 1.1, buildings: 150, trees: 320,
+        id: 'riverside', name: '리버사이드 스프린트', desc: '아치교로 강을 두 번 건너는 공원·주택가 코스, 대관람차와 보트', theme: 'river', seed: 21, scale: 1.1, buildings: 150, trees: 320,
         pts: [[0, -260], [210, -250], [330, -110], [260, 30], [340, 170], [160, 280], [-40, 220], [-110, 90], [-300, 130], [-360, -70], [-210, -230]]
     },
     {
-        id: 'harbor', name: '하버 나이트 서킷', desc: '헤어핀과 시케인이 이어지는 기술적인 항구 코스', seed: 33, scale: 1.15, buildings: 160, trees: 200,
+        id: 'harbor', name: '하버 나이트 서킷', desc: '컨테이너 부두와 크레인, 바다를 끼고 도는 기술적인 항구 코스', theme: 'harbor', seed: 33, scale: 1.15, buildings: 160, trees: 200,
         pts: [[0, -220], [160, -230], [300, -150], [330, -10], [260, 90], [290, 200], [180, 290], [40, 250], [-40, 150], [-150, 190], [-280, 120], [-320, -20], [-240, -120], [-130, -90], [-60, -170]]
     },
 ];

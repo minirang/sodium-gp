@@ -4,7 +4,7 @@ const PAD = [[3, 'cam'], [5, 'up'], [4, 'down'], [9, 'pause'], [2, 'reset']];
 
 export class Input {
     constructor(wheelEl) {
-        Object.assign(this, { keys: new Set(), hold: { thr: 0, brk: 0, hand: 0, back: 0 }, pulse: {}, pad: {}, steer: 0, thr: 0, mx: 0, wheelVal: null, mouseSteer: false, wheelEl });
+        Object.assign(this, { keys: new Set(), hold: { thr: 0, brk: 0, hand: 0, back: 0 }, pulse: {}, pad: {}, steer: 0, thr: 0, brk: 0, mx: 0, wheelVal: null, mouseSteer: false, wheelEl });
         addEventListener('keydown', (e) => {
             if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
             if (e.repeat) return;
@@ -42,7 +42,7 @@ export class Input {
 
     // 창 포커스를 잃거나 일시정지할 때 눌린 상태가 남지 않도록 모두 해제한다
     reset() {
-        this.keys.clear(); this.pulse = {}; this.wheelVal = null; this.thr = 0;
+        this.keys.clear(); this.pulse = {}; this.wheelVal = null; this.thr = 0; this.brk = 0; this.steer = 0;
         for (const k in this.hold) this.hold[k] = 0;
         document.querySelectorAll('[data-k].on').forEach((el) => el.classList.remove('on'));
     }
@@ -63,16 +63,19 @@ export class Input {
         else {
             // 키보드: 누르는 동안 핸들이 부드럽게 꺾여 유지되고, 놓으면 중앙으로 천천히 복귀한다
             const fast = clamp(kmh / 200, 0, 1), target = kb || (this.mouseSteer ? clamp(this.mx * 1.6, -1, 1) : 0);
-            let rate = kb ? (2.8 - 1.2 * fast) * sens : this.mouseSteer ? 8 : 3.2 + fast * 1.5;
-            if (kb && this.steer * kb < 0) rate *= 1.8;
+            // 고속일수록 천천히 꺾이고, 손을 떼면 빠르게 중앙으로 돌아온다 (반대 방향 전환은 더 빠르게)
+            let rate = kb ? (3.0 - 1.4 * fast) * sens : this.mouseSteer ? 8 : 4.2 + fast * 2;
+            if (kb && this.steer * kb < 0) rate *= 2;
             this.steer += clamp(target - this.steer, -rate * dt, rate * dt);
         }
         const gas = (k.has('ArrowUp') || k.has('KeyW') ? 1 : 0) || this.hold.thr || gt;
         this.thr += clamp(gas - this.thr, -dt * 8, dt * 5);
+        const stop = (k.has('ArrowDown') || k.has('KeyS') ? 1 : 0) || this.hold.brk || gb;
+        this.brk += clamp(stop - this.brk, -dt * 12, dt * 7); // 브레이크도 순간적으로 꽉 밟히지 않게 짧게 램프
         this.wheelEl.firstElementChild.style.transform = `rotate(${this.steer * 126}deg)`;
         return {
             steer: this.steer, rawSteer: this.steer, thr: this.thr,
-            brk: (k.has('ArrowDown') || k.has('KeyS') ? 1 : 0) || this.hold.brk || gb, hand: k.has('Space') ? 1 : this.hold.hand || gh,
+            brk: this.brk, hand: k.has('Space') ? 1 : this.hold.hand || gh,
         };
     }
 }
