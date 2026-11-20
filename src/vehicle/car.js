@@ -16,7 +16,7 @@ const torque = (r) => (r < 0.85 ? 0.68 + 0.32 * (r / 0.85) : r < 1 ? 1 - ((r - 0
 
 export class Car {
     constructor(world, scene, spec, look, pose, opts = {}) {
-        Object.assign(this, { world, scene, spec, look, gear: 1, shiftT: 0, rpm: 1000, kmh: 0, fs: 0, idx: 0, lap: 0, maxLap: 0, prog: 0, laps: [], lapT: 0, finished: false, hold: true, startAt: 0, hit: null, flipT: 0, reverse: false, braking: false, slide: 0, scrape: 0, draft: 0, steerIn: 0, onShift: null, delta: 0, ghost: 0, righting: null, contacts: 4, yaw: pose.yaw });
+        Object.assign(this, { world, scene, spec, look, gear: 1, shiftT: 0, rpm: 1000, kmh: 0, fs: 0, idx: 0, lap: 0, maxLap: 0, prog: 0, laps: [], lapT: 0, finished: false, hold: true, startAt: 0, hit: null, flipT: 0, reverse: false, braking: false, slide: 0, scrape: 0, draft: 0, steerIn: 0, onShift: null, delta: 0, ghost: 0, righting: null, contacts: 4, yaw: pose.yaw, hb: 0, wallT: 0 });
         this.fw = new C.Vec3(); this.rt = new C.Vec3(); this.upv = new C.Vec3(); this.upv2 = new C.Vec3(); this.aero = new C.Vec3(); this.fwd = { x: 1, z: 0 };
         const m = this.model = buildCar(look, opts);
         this.mesh = m.group; this.wheels = m.wheels; this.lights = m.lights;
@@ -75,7 +75,7 @@ export class Car {
         b.position.set(pos.x, 0.9, pos.z); b.quaternion.setFromEuler(0, yaw, 0);
         b.velocity.setZero(); b.angularVelocity.setZero();
         this.fwd.x = Math.cos(yaw); this.fwd.z = -Math.sin(yaw); this.yaw = yaw;
-        Object.assign(this, { gear: 1, delta: 0, righting: null, flipT: 0, shiftT: 0 });
+        Object.assign(this, { gear: 1, delta: 0, righting: null, flipT: 0, shiftT: 0, hb: 0, wallT: 0 });
         for (let i = 0; i < 4; i++) this.vehicle.setSteeringValue(0, i);
         this.capture(); this.snap(); this.render(1, false);
     }
@@ -110,7 +110,10 @@ export class Car {
         if (hl > 0.25) { this.fwd.x = fw.x / hl; this.fwd.z = fw.z / hl; this.yaw = Math.atan2(-this.fwd.z, this.fwd.x); }
         const speed = Math.hypot(b.velocity.x, b.velocity.z);
         this.kmh = speed * 3.6; this.shiftT = Math.max(0, this.shiftT - dt);
-        this.slide = this.kmh > 15 ? clamp(Math.abs(vlat) / 4 + (inp.hand ? 0.4 : 0), 0, 1) : 0;
+        // 핸드브레이크: 당기면 빠르게 걸리고, 놓으면 뒷바퀴 그립이 0.25초 정도에 걸쳐 자연스럽게 돌아온다
+        this.hb += clamp((inp.hand ? 1 : 0) - this.hb, -dt * 4, dt * 12);
+        this.wallT = Math.max(0, this.wallT - dt);
+        this.slide = this.kmh > 15 ? clamp(Math.abs(vlat) / 4 + this.hb * 0.45, 0, 1) : 0;
 
         const up = b.vectorToWorldFrame(UP, this.upv);
         if (this.righting) this.stepRight(dt);
@@ -122,12 +125,13 @@ export class Car {
         const r = clamp(a / this.vmax(this.gear), 0, 1.05), rearSlip = v.wheelInfos[2].sliding || v.wheelInfos[3].sliding;
         this.rpm = 1000 + 6500 * clamp(Math.max(r, inp.thr * 0.18) + (rearSlip && inp.thr > 0.5 ? 0.12 : 0), 0, 1.03);
 
+        this.lastThr = inp.thr || 0;
         let F = 0, brk = 0; this.reverse = false;
         const coast = !(inp.thr > 0.02) && !(inp.brk > 0.02);
         if (this.hold) { brk = 1; this.rpm = 1000 + 5500 * clamp(inp.thr, 0, 1); }
         else if (inp.thr > 0.02) {
             if (fs < -1.5) brk = inp.thr;
-            else if (!this.shiftT) F = Math.min(this.tcap, (this.P / (this.vmax(this.gear) * 0.85)) * torque(r)) * inp.thr;
+            else if (!this.shiftT) F = Math.min(this.tcap, (this.P / (this.vmax(this.gear) * 0.85)) * torque(r)) * inp.thr * (1 - 0.65 * this.hb);
         } else if (inp.brk > 0.02) {
             if (fs > 1.5) brk = inp.brk;
             else { this.reverse = true; F = fs > -11 ? -sp.mass * 3.4 * inp.brk : 0; }
@@ -148,19 +152,26 @@ export class Car {
         if (this.gear !== was) this.onShift?.(this.gear > was, inp.thr);
 
         // 브레이크는 '감속도'로 준다: 바퀴가 잠기지 않아 제동 중에도 조향이 살아 있다 (ABS 느낌)
-        const bi = brk * sp.mass * 13.5 * dt, eb = coast && !this.hold ? sp.mass * (0.7 + a * 0.015) * dt * 0.5 : 0;
-        this.braking = brk > 0.05 || inp.hand > 0;
+        const hb = this.hb, bi = brk * sp.mass * 13.5 * dt, eb = coast && !this.hold ? sp.mass * (0.7 + a * 0.015) * dt * 0.5 : 0;
+        // 핸드브레이크 제동: 고속에서는 뒷바퀴를 반쯤 잠가 미끄러지게, 저속에서는 차를 확실히 붙잡는다
+        const hbB = hb * sp.mass * (a < 3 ? 14 : 3.6) * dt;
+        this.braking = brk > 0.05 || hb > 0.3;
         for (const i of [0, 1]) { v.setBrake(bi * 0.31, i); v.applyEngineForce(0, i); }
         for (const i of [2, 3]) {
-            v.setBrake(F ? 0 : bi * 0.19 + eb + (inp.hand ? sp.mass * 1.5 : 0), i); v.applyEngineForce(F / 2, i);
-            v.wheelInfos[i].frictionSlip = this.gripR * (inp.hand ? 0.6 : 1);
+            v.setBrake((F ? 0 : bi * 0.19 + eb) + hbB, i); v.applyEngineForce(F / 2, i);
+            v.wheelInfos[i].frictionSlip = this.gripR * (1 - 0.45 * hb);
         }
 
-        let target = -inp.steer * this.maxSteer(a);
+        const drv = -inp.steer * this.maxSteer(a);
+        let target = drv;
         const w = b.angularVelocity;
-        if (inp.assist > 0 && a > 8) {
-            // 차가 명령보다 크게 회전(오버스티어)할 때 카운터 스티어 + 요 안정화
-            const cmd = (fs * Math.tan(this.delta)) / WB, over = w.y - cmd;
+        // 핸들을 꺾은 채 핸드브레이크를 당기면 뒤가 흐르기 시작하도록 회전을 살짝 거든다
+        if (hb > 0.05 && a > 7 && Math.abs(inp.steer) > 0.1) b.torque.y += -inp.steer * hb * sp.mass * 1.1 * clamp((a - 7) / 15, 0, 1) * clamp(1 - Math.abs(vlat) / (a * 0.45), 0, 1); // 이미 충분히 돌았으면 더 거들지 않음
+        // 드리프트 중(핸드브레이크)이나 벽에 부딪힌 직후에는 개입하지 않는다
+        if (inp.assist > 0 && a > 8 && hb < 0.2 && !this.wallT) {
+            // 운전자가 의도한 회전(핸들 입력 기준)보다 차가 크게 돌 때만 카운터 스티어 + 요 안정화.
+            // 보조 장치가 만든 조향을 기준으로 삼으면 스스로를 계속 증폭시키므로 반드시 입력 조향을 기준으로 한다
+            const cmd = (fs * Math.tan(drv)) / WB, over = w.y - cmd;
             if (Math.abs(over) > 0.35 && over * w.y > 0) {
                 target -= clamp(over * 0.12, -0.12, 0.12);
                 b.torque.y -= (over - Math.sign(over) * 0.35) * sp.mass * 1.8 * (inp.assist > 1 ? 4 : 2.5);
@@ -191,7 +202,7 @@ export class Car {
         const m = this.mesh;
         m.position.lerpVectors(this.pp, this.cp, alpha); m.quaternion.copy(this.pq).slerp(this.cq, alpha);
         this.model.brake(this.braking);
-        if (cockpit) this.model.cockpit?.update(this.steerIn);
+        if (cockpit) this.model.cockpit?.update(this.steerIn, this);
         for (let i = 0; i < 4; i++) { this.wheels[i].position.lerpVectors(this.wp[i], this.wc[i], alpha); this.wheels[i].quaternion.copy(this.wq[i]); }
         E.setFromQuaternion(m.quaternion, 'YXZ');
         const c = Math.cos(E.y), s = Math.sin(E.y), ox = this.spec.ox;

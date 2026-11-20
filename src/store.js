@@ -12,7 +12,7 @@ function sanitize(raw) {
     return {
         settings: {
             quality: Math.round(num(s.quality, 0, 3, DEFAULTS.quality)), master: num(s.master, 0, 1, DEFAULTS.master), engine: num(s.engine, 0, 1, DEFAULTS.engine),
-            fov: num(s.fov, 55, 100, DEFAULTS.fov), cam: oneOf(s.cam, ['chase', 'cockpit'], 'chase'), shift: oneOf(s.shift, ['auto', 'manual'], 'auto'),
+            fov: num(s.fov, 55, 100, DEFAULTS.fov), cam: oneOf(s.cam, ['chase', 'far', 'hood', 'cockpit'], 'chase'), shift: oneOf(s.shift, ['auto', 'manual'], 'auto'),
             assist: oneOf(s.assist, [0, 1, 2], 1), steer: num(s.steer, 0.5, 2, 1), mouse: !!s.mouse, touch: oneOf(s.touch, ['auto', 'on', 'off'], 'auto'),
             units: oneOf(s.units, ['kmh', 'mph'], 'kmh'), map: s.map !== false, time: oneOf(s.time, Object.keys(TIMES), 'dusk'),
         },

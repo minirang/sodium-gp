@@ -436,8 +436,8 @@ h2 {
 }
 
 #wheel {
-    left: 16px;
-    bottom: 16px;
+    left: max(16px, env(safe-area-inset-left));
+    bottom: max(16px, env(safe-area-inset-bottom));
     width: 150px;
     height: 150px;
     pointer-events: auto;
@@ -452,25 +452,38 @@ h2 {
 }
 
 .pedals,
-.side {
+.side,
+#rotate {
     display: none;
     pointer-events: auto
 }
 
-body.touch .pedals {
-    display: flex;
-    right: 16px;
-    bottom: 16px;
-    gap: 12px;
-    align-items: flex-end
+/* 터치 레이아웃: 왼쪽 아래 핸들, 오른쪽 아래 페달(핸드브레이크는 브레이크 위), 오른쪽 위(미니맵 왼쪽) 기능 버튼 3×2,
+   순위·랩 정보는 왼쪽 위에 세로로 쌓고, 속도계는 핸들과 페달 사이 가운데. 어떤 버튼도 서로 겹치지 않는다 */
+body.touch #wheel {
+    width: clamp(118px, 34vh, 170px);
+    height: clamp(118px, 34vh, 170px)
 }
 
+body.touch .pedals {
+    display: grid;
+    grid-template: "hand gas" auto "brk gas" auto / auto auto;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(14px, env(safe-area-inset-bottom));
+    gap: 10px;
+    align-items: end
+}
+
+body.touch .pedals .hand { grid-area: hand; height: clamp(44px, 12vh, 56px) }
+body.touch .pedals .brk { grid-area: brk; height: clamp(72px, 22vh, 96px) }
+body.touch .pedals .gas { grid-area: gas; height: clamp(126px, 36vh, 162px) }
+
 body.touch .side {
-    display: flex;
-    right: 16px;
-    top: 160px;
-    flex-direction: column;
-    gap: 8px
+    display: grid;
+    grid-template-columns: repeat(3, 54px);
+    gap: 6px;
+    top: max(12px, env(safe-area-inset-top));
+    right: calc(max(14px, env(safe-area-inset-right)) + 112px)
 }
 
 .pedals button,
@@ -483,19 +496,19 @@ body.touch .side {
 }
 
 .pedals button {
-    width: 78px;
-    height: 86px
+    width: 80px;
+    font-size: 14px
 }
 
 .pedals .gas {
-    width: 104px;
-    height: 150px;
-    font-size: 18px
+    width: 96px;
+    font-size: 17px
 }
 
 .side button {
-    padding: 10px 14px;
-    min-width: 78px
+    height: 40px;
+    padding: 0;
+    font-size: 13px
 }
 
 .pedals button.on,
@@ -504,13 +517,39 @@ body.touch .side {
     color: #1a1205
 }
 
-body.touch .dash {
-    left: auto;
-    right: 150px;
-    transform: none
+body.touch .rank { top: max(10px, env(safe-area-inset-top)); left: max(14px, env(safe-area-inset-left)); font-size: 36px }
+
+body.touch .lap {
+    top: max(10px, env(safe-area-inset-top));
+    left: calc(max(14px, env(safe-area-inset-left)) + 92px);
+    transform: none;
+    text-align: left
 }
 
-@media (max-width:640px) {
+body.touch .lap b { font-size: 18px }
+
+body.touch #map {
+    top: max(12px, env(safe-area-inset-top));
+    right: max(14px, env(safe-area-inset-right));
+    width: 100px;
+    height: 100px
+}
+
+body.touch .dash {
+    left: calc(max(16px, env(safe-area-inset-left)) + clamp(118px, 34vh, 170px) + 12px);
+    right: calc(max(14px, env(safe-area-inset-right)) + 200px);
+    transform: none;
+    justify-items: center;
+    justify-content: center;
+    bottom: max(14px, env(safe-area-inset-bottom))
+}
+
+body.touch .dash b { font-size: 42px }
+body.touch .dash span { font-size: 24px }
+body.touch #draft { bottom: auto; top: 24% }
+body.touch #lights { top: 112px }
+
+@media (max-width: 640px) {
     .brand h1 {
         font-size: 44px
     }
@@ -518,14 +557,33 @@ body.touch .dash {
     .panel {
         flex-basis: 100%
     }
+}
 
-    body.touch .dash {
-        display: none
-    }
+/* 좁은 가로 화면(작은 폰): 버튼과 속도계를 조금 더 작게 */
+@media (max-width: 700px) {
+    body.touch .side { grid-template-columns: repeat(3, 46px); right: calc(max(10px, env(safe-area-inset-right)) + 92px) }
+    body.touch #map { width: 80px; height: 80px }
+    body.touch .side button { font-size: 11px; height: 36px }
+    body.touch .pedals button { width: 66px }
+    body.touch .pedals .gas { width: 82px }
+    body.touch .dash { right: calc(max(10px, env(safe-area-inset-right)) + 170px) }
+    body.touch .dash b { font-size: 34px }
+    body.touch .dash small { display: none }
+    body.touch .lap { left: calc(max(10px, env(safe-area-inset-left)) + 70px) }
+}
 
-    #map {
-        width: 96px;
-        height: 96px
+/* 세로 화면에서 레이스 중이면 가로로 돌리라고 안내 */
+@media (orientation: portrait) {
+    body.touch.racing #rotate {
+        display: grid;
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        place-content: center;
+        background: rgba(8, 10, 18, .92);
+        font-size: 22px;
+        font-weight: 800;
+        text-align: center
     }
 }
 
@@ -556,7 +614,7 @@ body.touch .dash {
 }
 
 #lights {
-    top: 70px;
+    top: 100px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
@@ -620,3 +678,6 @@ body.touch .dash {
     color: var(--dim, #9aa3b5);
     font-size: 14px;
 }
+
+/* 1인칭에서는 실내 계기판이 속도·기어를 보여주므로 화면 계기판을 숨긴다 (터치 조작 화면은 유지) */
+body.cockpit:not(.touch) .dash { display: none }

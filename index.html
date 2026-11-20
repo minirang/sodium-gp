@@ -38,7 +38,7 @@
     <button id="openSettings">설정</button>
     <button id="fullscreen">전체 화면</button>
   </footer>
-  <p class="credit">3D 모델: Ferrari 458 Italia (vicent091036, CC BY) · CarConcept (Khronos glTF-Sample-Assets, CC BY 4.0)</p>
+  <p class="credit">3D 모델: Ferrari 458 Italia (vicent091036, CC BY) · CarConcept (Khronos glTF-Sample-Assets, CC BY 4.0) · 바이에른 G8 · 잉골 V10은 코드로 만든 차량</p>
 </main>
 
 <aside id="gfxTip" class="tip hidden">
@@ -55,16 +55,17 @@
   <div class="dash"><b id="spd">0</b><small id="unit">km/h</small><span id="gear">1</span><i><u id="rpm"></u></i></div>
   <div id="count"></div>
   <div id="wheel"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="none" stroke="#eef1f7" stroke-width="8" opacity=".85"/><path d="M50 50L10 64M50 50L90 64M50 50L50 92" stroke="#eef1f7" stroke-width="7" stroke-linecap="round" opacity=".85"/><path d="M50 4v13" stroke="#ffb454" stroke-width="8"/></svg></div>
-  <div class="pedals"><button data-k="hand">핸드</button><button data-k="brk">브레이크</button><button data-k="thr" class="gas">가속</button></div>
-  <div class="side"><button data-k="cam">시점</button><button data-k="up">기어 +</button><button data-k="down">기어 −</button><button data-k="back">뒤보기</button><button data-k="reset">복귀</button><button data-k="pause">Ⅱ</button></div>
+  <div class="pedals"><button data-k="hand" class="hand">핸드</button><button data-k="brk" class="brk">브레이크</button><button data-k="thr" class="gas">가속</button></div>
+  <div class="side"><button data-k="cam">시점</button><button data-k="up">기어+</button><button data-k="down">기어−</button><button data-k="back">뒤보기</button><button data-k="reset">복귀</button><button data-k="pause">Ⅱ</button></div>
+  <div id="rotate">화면을 가로로 돌려주세요</div>
 </section>
 
 <div id="guide" class="modal hidden"><div class="sheet">
   <h2>시작 전 가이드</h2>
   <ul>
-    <li><b>가속</b> ↑ / W · <b>브레이크·후진</b> ↓ / S · <b>핸드브레이크</b> Space</li>
+    <li><b>가속</b> ↑ / W · <b>브레이크·후진</b> ↓ / S · <b>핸드브레이크</b> Space (핸들을 꺾은 채 당기면 뒤가 미끄러지며 돌아요)</li>
     <li><b>조향</b> ← → / A D, 또는 화면의 핸들을 마우스·손가락으로 돌리기</li>
-    <li><b>시점 전환</b> C (1인칭 ↔ 3인칭) · <b>뒤보기</b> B 꾹 누르기 · <b>수동 기어</b> E / Q · <b>복귀</b> R · <b>일시정지</b> Esc</li>
+    <li><b>시점 전환</b> C (3인칭 → 멀리 → 보닛 → 1인칭) · <b>뒤보기</b> B 꾹 누르기 · <b>수동 기어</b> E / Q · <b>복귀</b> R · <b>일시정지</b> Esc</li>
     <li>게임패드(트리거 가속·브레이크, 왼쪽 스틱 조향)도 지원합니다. 앞차 바로 뒤에서는 슬립스트림으로 가속이 붙어요.</li>
     <li>모바일은 화면 버튼과 핸들을 동시에 누르는 멀티터치를 지원합니다.</li>
     <li>3바퀴를 가장 먼저 완주하면 우승. 벽과 건물에 부딪히면 속도를 잃고 차가 튕겨 나갑니다.</li>

@@ -46,15 +46,18 @@ export class Fx {
     }
 
     skid(car, i, on) {
-        car.skid ??= [null, null, null, null];
-        const w = car.wheels[i].position, last = car.skid[i];
-        if (!on) { car.skid[i] = null; return; }
-        car.skid[i] = { x: w.x, z: w.z };
-        if (!last) return;
-        const dx = w.x - last.x, dz = w.z - last.z, l = Math.hypot(dx, dz);
+        // 바퀴마다 [x, z, 유효] 를 재사용한다 (매 프레임 객체를 만들지 않음)
+        car.skid ??= new Float32Array(12);
+        const w = car.wheels[i].position, L = car.skid, j = i * 3;
+        if (!on) { L[j + 2] = 0; return; }
+        const lx = L[j], lz = L[j + 1], had = L[j + 2];
+        L[j] = w.x; L[j + 1] = w.z; L[j + 2] = 1;
+        if (!had) return;
+        const dx = w.x - lx, dz = w.z - lz, l = Math.hypot(dx, dz);
         if (l < 0.08 || l > 4) return;
         const px = (-dz / l) * 0.11, pz = (dx / l) * 0.11, a = this.pa.array, o = this.mi * 12, y = 0.06;
-        a.set([last.x - px, y, last.z - pz, last.x + px, y, last.z + pz, w.x - px, y, w.z - pz, w.x + px, y, w.z + pz], o);
+        a[o] = lx - px; a[o + 1] = y; a[o + 2] = lz - pz; a[o + 3] = lx + px; a[o + 4] = y; a[o + 5] = lz + pz;
+        a[o + 6] = w.x - px; a[o + 7] = y; a[o + 8] = w.z - pz; a[o + 9] = w.x + px; a[o + 10] = y; a[o + 11] = w.z + pz;
         this.mi = (this.mi + 1) % this.M; this.pa.needsUpdate = true;
     }
 
@@ -70,7 +73,8 @@ export class Fx {
     update(dt, camQ) {
         this.p.forEach((p, i) => {
             const d = this.d;
-            if (p.life <= 0) return;
+            if (p.life <= 0) { if (p.z0) return; p.z0 = 1; d.scale.setScalar(0); d.updateMatrix(); this.inst.setMatrixAt(i, d.matrix); return; }
+            p.z0 = 0;
             p.life -= dt; p.vy -= p.g * dt; p.x += p.vx * dt; p.y = Math.max(0.05, p.y + p.vy * dt); p.z += p.vz * dt;
             const t = 1 - Math.max(p.life, 0) / p.max, s = (p.s0 + (p.s1 - p.s0) * t) * (p.life > 0 ? 1 - Math.max(0, (t - 0.7) / 0.3) : 0);
             d.position.set(p.x, p.y, p.z); d.quaternion.copy(camQ); d.scale.setScalar(s); d.updateMatrix(); this.inst.setMatrixAt(i, d.matrix);

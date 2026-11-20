@@ -13,7 +13,7 @@ export class Hud {
 
     // 값이 바뀔 때만 DOM을 갱신한다
     set(k, text) { if (this.v[k] !== text) { this.v[k] = text; this.e[k].textContent = text; } }
-    show(v) { this.e.hud.classList.toggle('hidden', !v); }
+    show(v) { this.e.hud.classList.toggle('hidden', !v); document.body.classList.toggle('racing', v); }
     setLights(n) { [...this.e.lights.children].forEach((el, i) => el.classList.toggle('on', i < n)); }
     flash(text, good) {
         const f = this.e.flash; f.textContent = text; f.className = good ? 'good' : ''; clearTimeout(this.ft);
@@ -38,8 +38,8 @@ export class Hud {
         this.e.wrong.classList.toggle('hidden', !d.wrong); this.e.draft.classList.toggle('hidden', !d.draft);
         this.set('spd', String(Math.round(d.kmh * (mph ? 0.621 : 1)))); this.set('unit', mph ? 'mph' : 'km/h');
         this.set('gear', String(d.reverse ? 'R' : d.gear) + (d.manual ? ' M' : ''));
-        this.e.rpm.style.setProperty('--v', Math.min(1, (d.rpm - 1000) / 6500).toFixed(3));
-        const show = store.settings.map; this.e.map.style.display = show ? '' : 'none';
+        const rv = Math.min(1, Math.max(0, (d.rpm - 1000) / 6500)).toFixed(2); if (rv !== this.v.rpm) { this.v.rpm = rv; this.e.rpm.style.setProperty('--v', rv); }
+        const show = store.settings.map; if (show !== this.v.map) { this.v.map = show; this.e.map.style.display = show ? '' : 'none'; }
         if (show && (this.mf++ & 1) === 0) this.drawMap(d.cars, d.player);
     }
 

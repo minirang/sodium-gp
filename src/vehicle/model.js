@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { mergeStatic } from '../util/merge.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { CARS } from '../config.js';
+import { buildDesign } from './procedural.js';
+import { makeCockpit, BODY_LAYER } from './cockpit.js';
 import ferrariHero from '../../assets/ferrari-458.glb';
 import ferrariLod from '../../assets/ferrari-458-lod.glb';
 import conceptHero from '../../assets/concept.glb';
@@ -37,78 +40,6 @@ const box = (w, h, d, m, x = 0, y = 0, z = 0) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
     mesh.position.set(x, y, z); mesh.castShadow = true; return mesh;
 };
-
-function makeWheel(r, look, right) {
-    const g = new THREE.Group(), h = new THREE.Group();
-    const lip = mat(look.rim, { metalness: 0.9, roughness: 0.2 });
-    h.add(
-        new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.26, 28).rotateX(Math.PI / 2), mat(0x0c0d10, { roughness: 0.9 })),
-        new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r * 0.7, 0.27, 24).rotateX(Math.PI / 2), mat(0x1a1c22, { metalness: 0.6 })),
-    );
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 0.7, 0.025, 8, 28), lip); ring.position.z = 0.135; h.add(ring);
-    for (let i = 0; i < look.spokes; i++) {
-        const a = (i / look.spokes) * Math.PI * 2, s = new THREE.Mesh(new THREE.BoxGeometry(r * 0.62, r * 0.11, 0.04), lip);
-        s.position.set(Math.cos(a) * r * 0.33, Math.sin(a) * r * 0.33, 0.14); s.rotation.z = a; h.add(s);
-    }
-    if (!right) h.rotation.y = Math.PI;
-    g.add(h); g.traverse((o) => { o.castShadow = true; });
-    return g;
-}
-
-// 1인칭용 운전석: 핸들 + 장갑 낀 양손 + 팔. 핸들이 돌면 손도 같이 돈다.
-function makeCockpit(c) {
-    const g = new THREE.Group(), t = 0.42, R = 0.18;
-    const X = new THREE.Vector3(0, 0, 1), Y = new THREE.Vector3(Math.sin(t), Math.cos(t), 0), Z = new THREE.Vector3(-Math.cos(t), Math.sin(t), 0);
-    const piv = new THREE.Group(), spin = new THREE.Group();
-    piv.position.copy(c); piv.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z)); piv.add(spin); g.add(piv);
-    const leather = mat(0x15161a, { roughness: 0.65 }), glove = mat(0x0e0f12, { roughness: 0.8 }), sleeve = mat(0x24262d, { roughness: 0.9 });
-    spin.add(new THREE.Mesh(new THREE.TorusGeometry(R, 0.02, 10, 36), leather), box(0.34, 0.03, 0.02, leather), box(0.03, 0.17, 0.02, leather, 0, -0.085, 0), box(0.07, 0.07, 0.03, mat(0xffb454), 0, 0, 0.01));
-    const hands = [Math.PI * 1.02, -0.02].map((a) => {
-        const h = new THREE.Group();
-        h.add(new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8).scale(1, 0.85, 1.25), glove), new THREE.Mesh(new THREE.CapsuleGeometry(0.02, 0.085, 4, 8).rotateZ(Math.PI / 2), glove));
-        h.children[1].position.z = -0.02;
-        h.position.set(Math.cos(a) * R, Math.sin(a) * R, 0); h.rotation.z = a + Math.PI / 2; spin.add(h);
-        return { a };
-    });
-    const arms = [-0.2, 0.2].map((dz) => {
-        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.05, 1, 10), sleeve);
-        g.add(m); return { m, s: new THREE.Vector3(c.x - 0.62, c.y + 0.1, c.z + dz) };
-    });
-    const up = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), d = new THREE.Vector3(), q = new THREE.Quaternion();
-    return {
-        group: g,
-        update(steer) {
-            const th = -steer * Math.PI * 0.85; spin.rotation.z = th;
-            hands.forEach((h, i) => {
-                const a = h.a + th, px = Math.cos(a) * R, py = Math.sin(a) * R;
-                v.set(X.x * px + Y.x * py, X.y * px + Y.y * py, X.z * px + Y.z * py).add(c);
-                const { m, s } = arms[i], len = d.copy(v).sub(s).length();
-                m.position.copy(s).addScaledVector(d, 0.5); m.scale.set(1, len, 1); m.quaternion.copy(q.setFromUnitVectors(up, d.normalize()));
-            });
-        },
-    };
-}
-
-// 모델 없이 코드로 만든 차량 (VX, GT)
-function buildProcedural(look) {
-    const g = new THREE.Group();
-    const paint = new THREE.MeshPhysicalMaterial({ color: look.color, metalness: 0.55, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.2 });
-    const dark = mat(0x14161b, { roughness: 0.7 });
-    const glass = new THREE.MeshPhysicalMaterial({ color: 0x0b0f18, metalness: 0.8, roughness: 0.08 });
-    const tail = new THREE.MeshBasicMaterial({ color: 0x7a0f0f }), lamp = new THREE.MeshBasicMaterial({ color: 0xfff2c8 });
-    g.add(box(4.3, 0.55, 1.86, paint, 0, -0.2, 0), box(2.6, 0.08, 1.95, dark, 0, -0.46, 0), box(0.35, 0.05, 1.95, dark, 2.15, -0.45, 0), box(4.32, 0.01, 0.28, mat(0xffffff), 0, 0.08, 0));
-    const cabG = new THREE.BoxGeometry(2.1, 0.5, 1.6), p = cabG.attributes.position;
-    for (let i = 0; i < p.count; i++) if (p.getY(i) > 0) { p.setX(i, p.getX(i) * 0.62); p.setZ(i, p.getZ(i) * 0.84); }
-    cabG.computeVertexNormals();
-    const cab = new THREE.Mesh(cabG, glass); cab.position.set(-0.35, 0.33, 0); g.add(cab, box(1.3, 0.05, 1.34, paint, -0.35, 0.6, 0));
-    g.add(box(0.5, 0.05, 1.7, paint, -2.05, 0.5, 0), box(0.06, 0.34, 0.08, dark, -1.95, 0.3, 0.6), box(0.06, 0.34, 0.08, dark, -1.95, 0.3, -0.6), box(0.5, 0.18, 1.5, dark, 0.55, 0.2, 0));
-    for (const z of [-0.62, 0.62]) g.add(box(0.06, 0.1, 0.38, lamp, 2.16, -0.02, z));
-    for (const z of [-0.6, 0.6]) g.add(box(0.06, 0.1, 0.5, tail, -2.16, 0, z));
-    const r = look.wheel, pts = [[1.35, 0.88], [1.35, -0.88], [-1.3, 0.88], [-1.3, -0.88]].map(([x, z]) => new THREE.Vector3(x, r - 0.61, z));
-    const wheels = pts.map((_, i) => makeWheel(r, look, i % 2 === 0));
-    const dispose = () => [g, ...wheels].forEach((root) => root.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }));
-    return { group: g, wheels, wheelPts: pts, brake: (on) => tail.color.setHex(on ? 0xff2a2a : 0x7a0f0f), eye: new THREE.Vector3(-0.1, 0.42, -0.42), wheelC: new THREE.Vector3(0.28, 0.3, -0.42), lights: [], dispose };
-}
 
 function buildGltf(key, look, o) {
     const sp = GLTF_SPECS[key], cache = new Map(), own = [];
@@ -148,11 +79,23 @@ function buildGltf(key, look, o) {
 }
 
 export function buildCar(look, o = {}) {
-    const spec = CARS.find((c) => c.id === look.car), m = spec?.model && MODELS[spec.model] ? buildGltf(spec.model, look, o) : buildProcedural(look);
+    const spec = CARS.find((c) => c.id === look.car);
+    // 3D 모델 차량은 glb, 나머지는 코드로 만든 차체. 모델 로드에 실패해도 코드 차체로 대신한다
+    const m = spec?.model && MODELS[spec.model] ? buildGltf(spec.model, look, o) : buildDesign(spec?.design || 'ing', look, o);
+    // 차체·바퀴의 고정 부품을 머티리얼별로 합쳐 차 한 대의 드로우콜을 크게 줄인다
+    const made = [...mergeStatic(m.group), ...m.wheels.flatMap((w) => mergeStatic(w))];
+    const d = m.dispose; m.dispose = () => { d(); made.forEach((g) => g.dispose()); };
     if (o.lights) for (const z of [-0.62, 0.62]) {
         const s = new THREE.SpotLight(0xfff0d0, 0, 100, 0.55, 0.6, 1.4);
         s.position.set(2.1, 0, z); s.target.position.set(30, -1, z); m.group.add(s, s.target); m.lights.push(s);
     }
-    if (o.cockpit) { m.cockpit = makeCockpit(m.wheelC); m.group.add(m.cockpit.group); }
+    if (o.cockpit) {
+        // 1인칭에서는 바깥 차체·바퀴를 숨기고(레이어 1) 전용 실내를 보여준다. 차체는 그림자 카메라에는 남아 실내에 그늘을 드리운다.
+        // 유리는 그림자를 만들지 않아 앞 유리로 햇빛이 들어온다
+        const hide = (x) => { if (!x.isMesh) return; x.layers.set(BODY_LAYER); if ([].concat(x.material).some((q) => q.transparent)) x.castShadow = false; };
+        m.group.traverse(hide); m.wheels.forEach((w) => w.traverse(hide));
+        const own = []; m.cockpit = makeCockpit(m.eye, look, own); m.group.add(m.cockpit.group);
+        const d2 = m.dispose; m.dispose = () => { d2(); own.forEach((x) => x.dispose()); m.cockpit.group.traverse((x) => { if (x.isMesh) x.geometry.dispose(); }); };
+    }
     return m;
 }

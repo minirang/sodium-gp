@@ -25,6 +25,7 @@ export function resolveWalls(car, T) {
         if (over > pen) { pen = over; nx = wx; nz = wz; car.contact = [cx, cz]; }
     }
     if (pen > 0) { b.position.x += nx * pen; b.position.z += nz * pen; }
+    if (pen > 0) car.wallT = 0.3; // 벽과 닿은 직후 잠깐 주행 보조(카운터 스티어)를 쉬게 한다
     car.scrape = pen > 0 ? clamp(scrape / 25, 0, 1) : 0;
     return worst;
 }

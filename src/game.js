@@ -4,8 +4,10 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { CamRig, CAM_MODES } from './systems/camera.js';
 import { store } from './store.js';
-import { CARS, TRACKS, AI_LEVELS, QUALITY, LAPS, COLORS, RIM_COLORS, SPOKES } from './config.js';
+import { CARS, TRACKS, AI_LEVELS, QUALITY, LAPS, COLORS, RIM_COLORS, SPOKES, TIMES } from './config.js';
 import { buildTrack } from './world/city.js';
 import { makeSky } from './world/sky.js';
 import { buildCar } from './vehicle/model.js';
@@ -22,27 +24,43 @@ const STEP = 1 / 60;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const IDLE = { steer: 0, thr: 0, brk: 0, hand: 0, auto: true };
-const Y90 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
 const LR = new THREE.Vector3(), LU = new THREE.Vector3(), V = new THREE.Vector3(), V2 = new THREE.Vector3(), Q = new THREE.Quaternion(), Q2 = new THREE.Quaternion(), EU = new THREE.Euler();
+
+// 마지막 색 보정: 시간대별 색감(약한 틴트) + 채도·대비 살짝 + 비네트
+const GradeShader = {
+    uniforms: { tDiffuse: { value: null }, tint: { value: new THREE.Vector3(1, 1, 1) }, vig: { value: 0.28 }, sat: { value: 1.08 } },
+    vertexShader: 'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+    fragmentShader: `uniform sampler2D tDiffuse;uniform vec3 tint;uniform float vig,sat;varying vec2 vUv;
+void main(){vec4 c=texture2D(tDiffuse,vUv);vec3 col=c.rgb*tint;float l=dot(col,vec3(.299,.587,.114));col=mix(vec3(l),col,sat);
+col=(col-.5)*1.04+.5;vec2 d=vUv-.5;col*=1.-vig*smoothstep(.25,.85,dot(d,d)*2.2);gl_FragColor=vec4(clamp(col,0.,1.),c.a);}`,
+};
 
 export class Game {
     constructor() {
-        this.r = new THREE.WebGLRenderer({ canvas: document.getElementById('gl'), antialias: true, powerPreference: 'high-performance' });
+        // 블룸(후처리)을 쓰는 품질에서는 후처리 렌더 타깃이 MSAA를 하므로, 화면 버퍼의 MSAA는 낭비라 끈다
+        this.r = new THREE.WebGLRenderer({ canvas: document.getElementById('gl'), antialias: !QUALITY[store.settings.quality]?.bloom, powerPreference: 'high-performance' });
         this.r.toneMapping = THREE.ACESFilmicToneMapping;
         this.r.shadowMap.type = THREE.PCFSoftShadowMap;
         this.scene = new THREE.Scene();
         this.scene.fog = new THREE.Fog(0x7a587a, 40, 500);
         this.cam = new THREE.PerspectiveCamera(48, 1, 0.1, 1800);
-        this.sky = makeSky(); this.scene.add(this.sky.mesh);
+        this.sky = makeSky(store.settings.quality); this.scene.add(this.sky.mesh);
+        this.rig = new CamRig(this.cam);
         this.hemi = new THREE.HemisphereLight(); this.scene.add(this.hemi);
         const sun = this.sun = new THREE.DirectionalLight(0xffffff, 1), sc = sun.shadow.camera;
         sc.left = sc.bottom = -95; sc.right = sc.top = 95; sc.near = 1; sc.far = 420;
         sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.06;
+        sc.layers.enable(1); // 플레이어 차체(레이어 1)는 1인칭에서 안 보여도 그림자는 만든다
+        this.cam.layers.enable(1);
         this.scene.add(sun, sun.target);
         this.pmrem = new THREE.PMREMGenerator(this.r);
         this.fx = new Fx(this.scene);
+        // 메뉴에서도 레이스 때와 같은 수의 조명을 둔다 (플레이어 헤드라이트 2개). 조명 수가 바뀌면 모든 셰이더가 다시 컴파일돼 출발 순간 멈춘다
+        this.stand = [0, 1].map(() => { const l = new THREE.SpotLight(0xffffff, 0); l.position.set(0, -50, 0); return l; });
+        this.scene.add(...this.stand);
 
-        Object.assign(this, { input: new Input(document.getElementById('wheel')), sound: new Sound(), hud: new Hud(), mode: 'menu', cars: [], paused: false, shake: 0, oa: 0, time: 0, acc: 0, timers: new Set(), runId: 0, upP: 0, downP: 0, pin: { auto: true, up: 0, down: 0, assist: 0 }, chase: { yaw: 0, init: false }, focus: new THREE.Vector3(), fovCur: 70, lastBack: false });
+        Object.assign(this, { input: new Input(document.getElementById('wheel')), sound: new Sound(), hud: new Hud(), mode: 'menu', cars: [], paused: false, oa: 0, time: 0, acc: 0, timers: new Set(), runId: 0, upP: 0, downP: 0, pin: { auto: true, up: 0, down: 0, assist: 0 }, dyn: { t: 0, n: 0, k: 1, cool: 0, slow: 0, fast: 0, lock: 0, up: -99 }, debugCam: null });
+        this.r.info.autoReset = false;
         this.camMode = store.settings.cam;
         this.applySettings();
         addEventListener('resize', () => this.resize());
@@ -56,12 +74,13 @@ export class Game {
 
     applySettings() {
         const s = store.settings, q = this.q = QUALITY[s.quality], had = this.r.shadowMap.enabled;
-        this.pr = Math.min(devicePixelRatio, q.pr);
+        this.prMax = Math.min(devicePixelRatio, q.pr); this.pr = this.prMax * this.dyn.k;
         this.r.setPixelRatio(this.pr);
         this.r.shadowMap.enabled = this.sun.castShadow = q.shadow > 0;
+        const st = q.shadow >= 4096 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap, stCh = this.r.shadowMap.type !== st; this.r.shadowMap.type = st;
         if (q.shadow) { this.sun.shadow.mapSize.set(q.shadow, q.shadow); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null; }
-        if (had !== q.shadow > 0) this.scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); });
-        this.scene.fog.far = q.fog;
+        if (had !== q.shadow > 0 || stCh) this.scene.traverse((o) => { if (o.material) [].concat(o.material).forEach((m) => { m.needsUpdate = true; }); });
+        this.updateFar();
         this.sound.volume(s.master, s.engine);
         this.input.mouseSteer = !!s.mouse;
         document.body.classList.toggle('touch', s.touch === 'on' || (s.touch === 'auto' && matchMedia('(pointer:coarse)').matches));
@@ -74,12 +93,23 @@ export class Game {
                 this.comp.addPass(new RenderPass(this.scene, this.cam));
                 this.comp.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.55, 0.95));
                 this.comp.addPass(new OutputPass());
+                this.grade = new ShaderPass(GradeShader); this.comp.addPass(this.grade); this.applyGrade();
             } else this.comp = null;
         }
         if (this.timeId !== s.time) this.applyTime(s.time);
         if (this.mode === 'menu' && this.track && this.density !== q.trees) this.setTrack(store.track);
         this.resize();
+        if (this.track) this.needWarm = true;
     }
+
+    // 안개가 다 덮는 거리 너머는 아예 그리지 않는다 (카메라 far = 안개 끝). 하늘 구도 그 안에 들어오게 크기를 맞춘다
+    updateFar() {
+        const f = this.q.fog * (this.track?.def.theme === 'coast' ? 1.35 : 1);
+        this.scene.fog.far = f; this.cam.far = f * 1.08 + 40; this.cam.updateProjectionMatrix();
+        this.sky.mesh.scale.setScalar(Math.min(1, (this.cam.far * 0.92) / 1000));
+    }
+
+    applyGrade() { const t = this.tm; if (this.grade && t) { this.grade.uniforms.tint.value.set(...t.grade); this.grade.uniforms.vig.value = t.stars ? 0.36 : 0.26; } }
 
     applyTime(id) {
         this.timeId = id;
@@ -91,6 +121,8 @@ export class Game {
         const es = new THREE.Scene(); es.add(this.sky.clone());
         this.envRT?.dispose(); this.envRT = this.pmrem.fromScene(es, 0, 1, 2000); this.scene.environment = this.envRT.texture;
         this.track?.setTime(t); this.player?.lights.forEach((l) => { l.intensity = t.head; });
+        this.applyGrade();
+        this.needWarm = true;
     }
 
     resize() {
@@ -104,10 +136,23 @@ export class Game {
         if (this.track) { this.scene.remove(this.track.group); this.track.dispose(); }
         this.density = this.q.trees;
         this.track = buildTrack(TRACKS.find((t) => t.id === id), this.density);
+        this.updateFar();
         this.track.setTime(this.tm);
         this.scene.add(this.track.group);
         this.hud.setMap(this.track.S);
         if (this.mode === 'menu') this.showPreview();
+        this.needWarm = true;
+    }
+
+    // 예열: 화면 밖 물체까지 한 번 전부 그려서 셰이더 컴파일과 GPU 업로드를 미리 끝낸다.
+    // 이걸 안 하면 주행 중 처음 보이는 건물·소품이 그 순간 업로드/컴파일되며 화면이 순간 멈춘다
+    warm() {
+        if (!this.track) return;
+        const off = [], mask = this.cam.layers.mask; this.cam.layers.enableAll();
+        this.scene.traverse((o) => { if (o.frustumCulled && (o.isMesh || o.isPoints || o.isLine)) { o.frustumCulled = false; off.push(o); } });
+        try { if (this.comp) this.comp.render(); else this.r.render(this.scene, this.cam); }
+        finally { off.forEach((o) => { o.frustumCulled = true; }); this.cam.layers.mask = mask; }
+        this.dyn.t = 0; this.dyn.n = 0; this.clock?.getDelta();
     }
 
     showPreview() {
@@ -136,7 +181,7 @@ export class Game {
         this.cars = [0, 1, 2, 3, 4, 5].map((k) => {
             const pose = this.track.grid(k);
             let car, persona;
-            if (k === 3) { car = new Car(w, this.scene, ps, L, pose, { cockpit: true, lights: true }); car.name = '나'; this.player = car; persona = PERSONAS[4]; }
+            if (k === 3) { car = new Car(w, this.scene, ps, L, pose, { cockpit: true, lights: true }); car.name = '나'; car.snd = ps.snd; this.player = car; persona = PERSONAS[4]; }
             else {
                 // AI 차량은 매번 무작위로 고른다 (무거운 Ferrari 모델은 최대 1대)
                 let pick; do { pick = CARS[Math.floor(rnd() * CARS.length)]; } while (pick.id === 'f458' && ferrari >= 1);
@@ -144,21 +189,24 @@ export class Game {
                 persona = personas[a];
                 const look = { car: pick.id, color: colors[Math.floor(rnd() * colors.length)], rim: RIM_COLORS[Math.floor(rnd() * RIM_COLORS.length)], wheel: 0.36, spokes: SPOKES[Math.floor(rnd() * 3)] };
                 const spec = { ...ps, hx: pick.hx, hz: pick.hz, ox: pick.ox, power: ps.power * (0.97 + rnd() * 0.06) };
-                car = new Car(w, this.scene, spec, look, pose, { lod: true }); car.name = `AI ${a + 1}`; car.tag = persona.name; a++;
+                car = new Car(w, this.scene, spec, look, pose, { lod: true }); car.name = `AI ${a + 1}`; car.tag = persona.name; car.snd = pick.snd; a++;
                 if (this.q.shadow < 2048) { car.mesh.traverse((o) => { o.castShadow = false; }); car.wheels.forEach((x) => x.traverse((o) => { o.castShadow = false; })); }
             }
             this.initIdx(car);
             car.ai = new AI(car, this.track.S, k === 3 ? AI_LEVELS[1] : lv, persona, rnd() * 6, this.track.limit);
             car.startAt = k === 3 ? 0 : car.ai.react;
-            car.hit = (v) => { if (car === this.player) { this.sound.hit(v); this.shake = Math.min(1, v / 18); } };
+            car.hit = (v) => { if (car === this.player) { this.sound.hit(v); this.rig.shake = Math.min(1, v / 18); } };
             return car;
         });
         this.player.onShift = (up, thr) => this.sound.shift(up, thr);
+        this.sound.setProfile(ps.snd);
         this.player.lights.forEach((l) => { l.intensity = this.tm.head; });
+        this.scene.remove(...this.stand);
+        this.needWarm = true;
         // 5개 신호등이 1초 간격으로 켜진 뒤, 무작위 시간(0.4~1.4초) 후 꺼지면 출발
         Object.assign(this, { stuckT: 0, mode: 'count', cdT: 0, goAt: 5 + 0.4 + rnd(), time: 0, lit: -1, paused: false, acc: 0, camMode: store.settings.cam, order: this.cars });
-        this.cam.fov = this.fovCur = store.settings.fov; this.cam.near = this.camMode === 'cockpit' ? 0.1 : 0.25; this.cam.updateProjectionMatrix();
-        this.chase.init = false; this.input.reset(); this.hud.clear();
+        this.cam.fov = store.settings.fov; this.cam.near = this.rig.near(this.camMode); this.cam.updateProjectionMatrix();
+        this.rig.reset(); this.rig.fov = store.settings.fov; this.input.reset(); this.hud.clear();
     }
 
     go() {
@@ -176,13 +224,13 @@ export class Game {
 
     cleanup() {
         this.clearTimers(); this.runId++;
-        this.cars.forEach((c) => c.dispose()); this.cars = []; this.world = null; this.player = null;
+        this.cars.forEach((c) => c.dispose()); this.cars = []; this.scene.add(...this.stand); this.world = null; this.player = null;
         this.sound.stop(); this.fx.clear(); this.hud.show(false); this.hud.clear(); this.input.reset(); this.mode = 'menu';
     }
 
     toMenu() {
         this.cleanup(); this.paused = false; show('#menu');
-        this.cam.fov = 48; this.cam.near = 0.1; this.cam.updateProjectionMatrix();
+        this.cam.fov = 48; this.cam.near = 0.1; this.cam.updateProjectionMatrix(); this.cam.up.set(0, 1, 0);
         this.showPreview();
     }
     restart() { this.cleanup(); this.begin(); }
@@ -205,7 +253,7 @@ export class Game {
         }
         c.place({ pos: s.p.clone().addScaledVector(s.n, best), yaw: s.yaw }); c.ghost = 2.5;
         if (c.ai) { c.ai.stuck = 0; c.ai.rec = null; c.ai.slow = 0; }
-        if (c === this.player) { this.chase.init = false; this.stuckT = 0; }
+        if (c === this.player) { this.rig.init = false; this.stuckT = 0; }
     }
 
     trackProgress(c) {
@@ -240,15 +288,38 @@ export class Game {
     }
 
     frame() {
-        const dt = Math.min(this.clock.getDelta(), 0.05);
-        this.track.update(this.clock.elapsedTime);
-        if (this.mode === 'menu') this.orbit(dt);
+        if (this.needWarm) { this.needWarm = false; this.warm(); }
+        const raw = this.clock.getDelta(), dt = Math.min(raw, 0.05);
+        this.r.info.reset();
+        this.track.update(this.clock.elapsedTime); this.sky.update(this.clock.elapsedTime);
+        this.dynRes(raw);
+        if (this.debugCam) { const [x, y, z, lx, ly, lz] = this.debugCam; this.cam.position.set(x, y, z); this.cam.lookAt(lx, ly, lz); this.lightAt(this.cam.position); }
+        else if (this.mode === 'menu') this.orbit(dt);
         else {
             if (this.input.take('pause')) this.pause(!this.paused);
             if (!this.paused) this.simulate(dt);
         }
         this.sky.mesh.position.copy(this.cam.position);
+        // 1인칭(뒤 보기 제외): 바깥 차체(레이어 1) 대신 실내(레이어 2)를 그린다
+        const inside = this.mode !== 'menu' && !this.debugCam && this.camMode === 'cockpit' && !this.input.back;
+        this.cam.layers.mask = 1 | (inside ? 4 : 2);
+        document.body.classList.toggle('cockpit', inside);
         if (this.comp) this.comp.render(); else this.r.render(this.scene, this.cam);
+    }
+
+    // 동적 해상도: 프레임이 '계속' 느릴 때만 렌더 해상도를 낮추고, 오래 여유가 있을 때만 올린다.
+    // 해상도를 바꾸면 렌더 타깃을 다시 만들어 한 프레임 멈추므로, 자주 오르내리지 않게 여유를 크게 둔다
+    dynRes(raw) {
+        const d = this.dyn; d.t += Math.min(raw, 0.05); d.n++; d.cool = Math.max(0, d.cool - raw); d.lock = Math.max(0, d.lock - raw);
+        if (d.t < 2) return;
+        const ms = (d.t / d.n) * 1000; d.t = 0; d.n = 0;
+        if (document.hidden || this.paused || this.mode === 'menu') { d.slow = d.fast = 0; return; }
+        d.slow = ms > 22 ? d.slow + 1 : 0; d.fast = ms < 13 ? d.fast + 1 : 0;
+        if (d.cool > 0) return;
+        let k = d.k;
+        if (d.slow >= 2) { k = Math.max(0.6, k - 0.15); if (this.time - d.up < 10) d.lock = 60; } // 올리자마자 느려졌다면 한동안 다시 올리지 않는다
+        else if (d.fast >= 4 && k < 1 && !d.lock) { k = Math.min(1, k + 0.1); d.up = this.time; }
+        if (k !== d.k) { d.k = k; d.cool = 4; d.slow = d.fast = 0; this.pr = this.prMax * k; this.r.setPixelRatio(this.pr); this.resize(); }
     }
 
     orbit(dt) {
@@ -323,7 +394,7 @@ export class Game {
 
     simulate(dt) {
         const inp = this.input, st = store.settings, pl = this.player, pi = inp.read(dt, st.steer, pl.kmh), S = this.track.S;
-        if (inp.take('cam')) { this.camMode = this.camMode === 'chase' ? 'cockpit' : 'chase'; this.cam.near = this.camMode === 'cockpit' ? 0.1 : 0.25; this.cam.updateProjectionMatrix(); this.chase.init = false; }
+        if (inp.take('cam')) { this.camMode = CAM_MODES[(CAM_MODES.indexOf(this.camMode) + 1) % CAM_MODES.length]; this.cam.near = this.rig.near(this.camMode); this.cam.updateProjectionMatrix(); this.rig.init = false; this.hud.flash(`시점: ${{ chase: '3인칭', far: '3인칭 (멀리)', hood: '보닛', cockpit: '1인칭' }[this.camMode]}`, false); }
         if (inp.take('reset') && this.mode === 'race') this.respawn(pl);
         this.upP ||= inp.take('up') || 0; this.downP ||= inp.take('down') || 0;
 
@@ -352,46 +423,24 @@ export class Game {
             if (lit !== this.lit) { this.lit = lit; this.hud.setLights(lit); if (lit > 0) this.sound.beep(380 + lit * 40, 0.14); }
         }
         this.hud.update({ pos: pos + 1, total: this.cars.length, lap: pl.lap, time: this.mode === 'count' ? 0 : this.time, best: pl.laps.length ? Math.min(...pl.laps) : 0, kmh: pl.kmh, gear: pl.gear, reverse: pl.reverse, manual: st.shift === 'manual', rpm: pl.rpm, cars: this.cars, player: pl, gap, wrong: this.mode === 'race' && pl.kmh > 12 && v.x * t.x + v.z * t.z < -pl.kmh / 7, draft: pl.draft > 0.15 });
-        this.sound.drive({ rpm: pl.rpm, thr: pi.thr, kmh: pl.kmh, slide: pl.slide, scrape: pl.scrape });
+        // 가까운 AI 차량 엔진음: 거리 감쇠 + 좌우 패닝 + 도플러
+        const cam = this.cam, cr = V.set(1, 0, 0).applyQuaternion(cam.quaternion), near = [];
+        for (const c of this.cars) {
+            if (c === pl) continue;
+            const dx = c.body.position.x - cam.position.x, dz = c.body.position.z - cam.position.z, d = Math.hypot(dx, dz);
+            if (d > 90) continue;
+            const ux = dx / (d || 1), uz = dz / (d || 1), vrel = -((c.body.velocity.x - pl.body.velocity.x) * ux + (c.body.velocity.z - pl.body.velocity.z) * uz);
+            near.push({ rpm: c.rpm, thr: c.lastThr || 0, dist: d, pan: ux * cr.x + uz * cr.z, snd: c.snd, vrel });
+        }
+        near.sort((a, b) => a.dist - b.dist);
+        this.sound.drive({ rpm: pl.rpm, thr: pi.thr, kmh: pl.kmh, slide: pl.slide, scrape: pl.scrape, inside: this.camMode === 'hood' || this.camMode === 'cockpit', ground: pl.contacts > 2 }, near);
         this.updateCamera(dt);
         this.fx.update(dt, this.cam.quaternion);
     }
 
     updateCamera(dt) {
-        const c = this.player, cam = this.cam, st = store.settings, back = this.input.back, p = c.mesh.position, f = this.focus;
-        // 화면에 보이는(보간된) 차량 위치를 기준으로 하고, 상하 흔들림만 부드럽게 걸러낸다
-        if (!this.chase.init) f.copy(p); else { f.x = p.x; f.z = p.z; f.y += (p.y - f.y) * (1 - Math.exp(-dt * 4)); }
-
-        // 시야각 변화는 작고 느리게: 속도에 따라 크기가 출렁이는 느낌을 없앤다
-        const tf = st.fov + clamp((c.kmh - 100) / 150, 0, 1) * 5;
-        this.fovCur += (tf - this.fovCur) * (1 - Math.exp(-dt * 1.5));
-        if (Math.abs(cam.fov - this.fovCur) > 0.03) { cam.fov = this.fovCur; cam.updateProjectionMatrix(); }
-
-        const ch = this.chase, carYaw = c.yaw, vel = c.body.velocity, far = clamp(c.kmh / 260, 0, 1);
-        if (this.camMode === 'cockpit') {
-            // 피치/롤은 일부만 반영해 어지럽지 않게 한다
-            Q.setFromEuler(EU.set(0, carYaw, 0)); Q2.copy(Q).slerp(c.mesh.quaternion, c.righting ? 0 : 0.4);
-            cam.position.copy(f).add(V.copy(c.model.eye).applyQuaternion(Q2));
-            cam.quaternion.copy(Q2).multiply(Y90).multiply(Q.setFromEuler(EU.set(0, -c.steerIn * 0.1 + (back ? Math.PI : 0), 0)));
-            ch.init = true;
-        } else {
-            // 차체 방향과 진행 방향을 섞어 부드럽게 따라가는 추적 카메라
-            let ty = carYaw;
-            if (Math.hypot(vel.x, vel.z) > 6) ty += wrap(Math.atan2(-vel.z, vel.x) - carYaw) * 0.45;
-            if (back) ty += Math.PI;
-            if (!ch.init || back !== this.lastBack) { ch.yaw = ty; ch.init = true; V.set(Math.cos(ty), 0, -Math.sin(ty)); cam.position.copy(f).addScaledVector(V, -6.4).setY(f.y + 2.1); }
-            // 차가 뒤집히거나 바로 세워지는 동안은 카메라가 휘둘리지 않도록 천천히 따라간다
-            ch.yaw += wrap(ty - ch.yaw) * (1 - Math.exp(-dt * (c.righting || c.contacts < 2 ? 1.5 : 6)));
-            V.set(Math.cos(ch.yaw), 0, -Math.sin(ch.yaw));
-            const dist = 6.3 + far * 0.9, fy = Math.min(f.y, 1.4);
-            V2.copy(f).addScaledVector(V, -dist); V2.y = fy + 1.45 + far * 0.25;
-            cam.position.lerp(V2, 1 - Math.exp(-dt * 14)); cam.position.y = Math.max(cam.position.y, 0.8);
-            cam.lookAt(V2.copy(f).addScaledVector(V, 6 + far * 3).setY(fy + 0.45));
-        }
-        this.lastBack = back;
-        // 충돌 흔들림: 감쇠하는 사인파 (매 프레임 무작위 떨림 없음)
-        this.shake = Math.max(0, this.shake - dt * 2.2);
-        if (this.shake) { const t = this.clock.elapsedTime * 55, s = this.shake * 0.12; cam.position.x += Math.sin(t) * s; cam.position.y += Math.sin(t * 1.3 + 1) * s; cam.position.z += Math.sin(t * 0.9 + 2) * s; }
-        this.lightAt(f);
+        const c = this.player;
+        this.rig.update(dt, c, this.camMode, this.input.back, store.settings.fov);
+        this.lightAt(this.rig.focus);
     }
 }

@@ -63,8 +63,8 @@ export class Input {
         else {
             // 키보드: 누르는 동안 핸들이 부드럽게 꺾여 유지되고, 놓으면 중앙으로 천천히 복귀한다
             const fast = clamp(kmh / 200, 0, 1), target = kb || (this.mouseSteer ? clamp(this.mx * 1.6, -1, 1) : 0);
-            // 고속일수록 천천히 꺾이고, 손을 떼면 빠르게 중앙으로 돌아온다 (반대 방향 전환은 더 빠르게)
-            let rate = kb ? (3.0 - 1.4 * fast) * sens : this.mouseSteer ? 8 : 4.2 + fast * 2;
+            // 누르면 바로 반응하도록 빠르게 꺾이고(고속에서는 조금 덜), 손을 떼면 빠르게 중앙으로 돌아온다 (반대 방향 전환은 더 빠르게)
+            let rate = kb ? (6 - 2.5 * fast) * sens : this.mouseSteer ? 8 : 6 + fast * 2;
             if (kb && this.steer * kb < 0) rate *= 2;
             this.steer += clamp(target - this.steer, -rate * dt, rate * dt);
         }
