@@ -23,7 +23,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const IDLE = { steer: 0, thr: 0, brk: 0, hand: 0, auto: true };
 const Y90 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
-const V = new THREE.Vector3(), V2 = new THREE.Vector3(), Q = new THREE.Quaternion(), Q2 = new THREE.Quaternion(), EU = new THREE.Euler();
+const LR = new THREE.Vector3(), LU = new THREE.Vector3(), V = new THREE.Vector3(), V2 = new THREE.Vector3(), Q = new THREE.Quaternion(), Q2 = new THREE.Quaternion(), EU = new THREE.Euler();
 
 export class Game {
     constructor() {
@@ -37,7 +37,7 @@ export class Game {
         this.hemi = new THREE.HemisphereLight(); this.scene.add(this.hemi);
         const sun = this.sun = new THREE.DirectionalLight(0xffffff, 1), sc = sun.shadow.camera;
         sc.left = sc.bottom = -95; sc.right = sc.top = 95; sc.near = 1; sc.far = 420;
-        sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.05;
+        sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.06;
         this.scene.add(sun, sun.target);
         this.pmrem = new THREE.PMREMGenerator(this.r);
         this.fx = new Fx(this.scene);
@@ -157,7 +157,7 @@ export class Game {
         this.player.lights.forEach((l) => { l.intensity = this.tm.head; });
         // 5개 신호등이 1초 간격으로 켜진 뒤, 무작위 시간(0.4~1.4초) 후 꺼지면 출발
         Object.assign(this, { stuckT: 0, mode: 'count', cdT: 0, goAt: 5 + 0.4 + rnd(), time: 0, lit: -1, paused: false, acc: 0, camMode: store.settings.cam, order: this.cars });
-        this.cam.fov = this.fovCur = store.settings.fov; this.cam.near = this.camMode === 'cockpit' ? 0.05 : 0.2; this.cam.updateProjectionMatrix();
+        this.cam.fov = this.fovCur = store.settings.fov; this.cam.near = this.camMode === 'cockpit' ? 0.1 : 0.25; this.cam.updateProjectionMatrix();
         this.chase.init = false; this.input.reset(); this.hud.clear();
     }
 
@@ -258,10 +258,13 @@ export class Game {
         this.lightAt(s.p);
     }
 
-    // 그림자 카메라가 움직일 때 생기는 깜빡임을 줄이려고 목표점을 격자에 맞춘다
+    // 그림자 카메라를 그림자 맵 텍셀 단위로 맞춰 이동시킨다. 차가 움직여도 그림자 가장자리가 지글거리거나 선이 깜빡이지 않는다
     lightAt(p) {
-        const x = Math.round(p.x * 2) / 2, z = Math.round(p.z * 2) / 2;
-        this.sun.target.position.set(x, 0, z); this.sun.position.set(x, 0, z).addScaledVector(this.dir, 150);
+        const d = this.dir, size = this.sun.shadow.mapSize.x || 2048, tx = 190 / size;
+        LR.set(d.z, 0, -d.x).normalize(); LU.crossVectors(d, LR).normalize();
+        const a = Math.round((p.x * LR.x + p.z * LR.z) / tx) * tx, b = Math.round((p.x * LU.x + p.z * LU.z) / tx) * tx, c = p.x * d.x + p.z * d.z;
+        V.copy(LR).multiplyScalar(a).addScaledVector(LU, b).addScaledVector(d, c);
+        this.sun.target.position.copy(V); this.sun.position.copy(V).addScaledVector(d, 150);
     }
 
     // 완주한 플레이어: 코스를 따라 직진하며 서서히 정지
@@ -320,7 +323,7 @@ export class Game {
 
     simulate(dt) {
         const inp = this.input, st = store.settings, pl = this.player, pi = inp.read(dt, st.steer, pl.kmh), S = this.track.S;
-        if (inp.take('cam')) { this.camMode = this.camMode === 'chase' ? 'cockpit' : 'chase'; this.cam.near = this.camMode === 'cockpit' ? 0.05 : 0.2; this.cam.updateProjectionMatrix(); this.chase.init = false; }
+        if (inp.take('cam')) { this.camMode = this.camMode === 'chase' ? 'cockpit' : 'chase'; this.cam.near = this.camMode === 'cockpit' ? 0.1 : 0.25; this.cam.updateProjectionMatrix(); this.chase.init = false; }
         if (inp.take('reset') && this.mode === 'race') this.respawn(pl);
         this.upP ||= inp.take('up') || 0; this.downP ||= inp.take('down') || 0;
 

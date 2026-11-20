@@ -178,7 +178,7 @@ export function buildTrack(def, density = 1) {
         const mask = new THREE.CanvasTexture(cv); mask.anisotropy = 4;
         groundMat.alphaMap = mask; groundMat.alphaTest = 0.5;
         const land = new THREE.Mesh(new THREE.PlaneGeometry(span, span).rotateX(-Math.PI / 2), groundMat);
-        land.position.set(X0 + span / 2, 0, Z0 + span / 2); land.receiveShadow = true; group.add(land);
+        land.position.set(X0 + span / 2, -0.06, Z0 + span / 2); land.receiveShadow = true; group.add(land);
         groundTex.repeat.set(span / 18, span / 18);
         const sea = water.clone(); sea.needsUpdate = true; sea.repeat.set(120, 60);
         const seaMat = new THREE.MeshStandardMaterial({ map: sea, roughness: 0.12, metalness: 0.35, emissive: 0x06202e, envMapIntensity: 1.1 });
@@ -189,7 +189,7 @@ export function buildTrack(def, density = 1) {
         quay.position.set(X0 + span / 2, -0.45, Z0 + span / 2); quay.scale.setScalar(1.004); group.add(quay);
     } else {
         const ground = new THREE.Mesh(new THREE.PlaneGeometry(SPAN, SPAN).rotateX(-Math.PI / 2), groundMat);
-        ground.position.set(ctr.x, 0, ctr.z); ground.receiveShadow = true; group.add(ground);
+        ground.position.set(ctr.x, -0.06, ctr.z); ground.receiveShadow = true; group.add(ground);
     }
 
     // ── 강 (리버사이드): 코스를 가로질러 흐르는 강. 코스와 겹치는 길이가 가장 짧은(가장 수직으로 건너는) 물길을 고른다
@@ -212,10 +212,10 @@ export function buildTrack(def, density = 1) {
         if (RIV) {
             riverD = (x, z) => { let d = Infinity; for (let i = 0; i < RIV.length; i += 2) d = Math.min(d, (RIV[i].p.x - x) ** 2 + (RIV[i].p.z - z) ** 2); return Math.sqrt(d); };
             const wm = new THREE.MeshStandardMaterial({ map: water, roughness: 0.08, metalness: 0.3, emissive: 0x0a2a3a, envMapIntensity: 1, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 2 });
-            const rv = new THREE.Mesh(ribbon(RIV, -RW, RW, 0.012, 30, false), wm); rv.receiveShadow = true; group.add(rv);
+            const rv = new THREE.Mesh(ribbon(RIV, -RW, RW, -0.035, 30, false), wm); rv.receiveShadow = true; group.add(rv);
             anims.push((t) => { water.offset.y = -t * 0.04; });
             const bank = std({ color: 0x7a776d, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-            for (const sd of [-1, 1]) group.add(new THREE.Mesh(ribbon(RIV, sd * RW, sd * (RW + 3), 0.02, 10, false), bank));
+            for (const sd of [-1, 1]) group.add(new THREE.Mesh(ribbon(RIV, sd * RW, sd * (RW + 3), -0.02, 10, false), bank));
         }
     }
     const wet = (x, z, m = 0) => !isLand(x, z) || riverD(x, z) < RW + m;
@@ -224,7 +224,7 @@ export function buildTrack(def, density = 1) {
     const add = (a, b, y, mat, vs) => { const m = new THREE.Mesh(ribbon(S, a, b, y, vs), mat); m.receiveShadow = true; group.add(m); return m; };
     add(-W / 2, W / 2, 0.03, std({ map: asphalt, roughness: 0.6, metalness: 0.1 }), 12);
     const kerbM = std({ map: kerb, roughness: 0.7 }), walkM = std({ color: def.theme === 'city' ? 0x6a6d76 : 0x5a5d66, roughness: 0.95 });
-    [1, -1].forEach((sd) => { add(sd * W / 2, sd * (W / 2 + 1), 0.04, kerbM, 3); add(sd * (W / 2 + 1), sd * (W / 2 + 7), 0.08, walkM, 10); });
+    [1, -1].forEach((sd) => { add(sd * W / 2, sd * (W / 2 + 1), 0.045, kerbM, 3); add(sd * (W / 2 + 1), sd * (W / 2 + 7), 0.09, walkM, 10); });
     const line = new THREE.Mesh(new THREE.PlaneGeometry(W, 2.4).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: checker }));
     line.position.set(S[0].p.x, 0.07, S[0].p.z); line.rotation.y = S[0].yaw + Math.PI / 2; group.add(line);
 
@@ -530,7 +530,8 @@ export function buildTrack(def, density = 1) {
     const bars = [], [ca, cb, every] = T.barrier, colA = new THREE.Color(ca), colB = new THREE.Color(cb);
     for (let i = 0; i < N; i += 2) for (const sd of [-1, 1]) { const s = S[i], o = sd * (W / 2 + 1.5); bars.push({ x: s.p.x + s.n.x * o, z: s.p.z + s.n.z * o, yaw: s.yaw, i, sd }); }
     inst(new THREE.BoxGeometry(9, T.barrierH, 1), new THREE.MeshStandardMaterial({ roughness: 0.85 }), bars.length, (i, col) => {
-        const b = bars[i]; D.position.set(b.x, T.barrierH / 2, b.z); D.rotation.y = b.yaw; col((i >> 1) % every === 0 ? colB : colA);
+        // 이웃 블록이 1m 겹치므로, 줄무늬 블록을 아주 조금 크게 해 겹친 면이 깜빡이지(z-fighting) 않게 한다
+        const b = bars[i], hi = (i >> 1) % every === 0; D.position.set(b.x, T.barrierH / 2 + (hi ? 0.005 : 0), b.z); D.rotation.y = b.yaw; if (hi) D.scale.set(0.995, 1.01, 1.04); col(hi ? colB : colA);
     }, true);
     T.ads.forEach(([text, bg, fg], k) => {
         const list = bars.filter((b) => b.i % 10 === 0 && ((b.i / 10 + (b.sd > 0 ? 1 : 0)) | 0) % T.ads.length === k && !startZone(b.i));
